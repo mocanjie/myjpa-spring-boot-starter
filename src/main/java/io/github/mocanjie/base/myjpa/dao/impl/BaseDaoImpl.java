@@ -82,11 +82,11 @@ public class BaseDaoImpl implements IBaseDao {
 	}
 
 	@Override
-	public <T> T querySingleByField(String fieldName, String fieldValue, Class<T> clazz) {
+	public <PO> PO querySingleByField(String fieldName, String fieldValue, Class<PO> clazz) {
 		String sql = SqlParser.getSelectByFieldSql(TableInfoBuilder.getTableInfo(clazz), fieldName);
 		Map<String,Object> param = new HashMap<>();
 		param.put(fieldName,fieldValue);
-		List<T> list = this.queryListForSql(sql, param,clazz);
+		List<PO> list = this.queryListForSql(sql, param,clazz);
 		return (list==null || list.isEmpty())?null:list.get(0);
 	}
 

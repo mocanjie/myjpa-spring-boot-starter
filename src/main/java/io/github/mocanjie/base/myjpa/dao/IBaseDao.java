@@ -16,14 +16,14 @@ public interface IBaseDao {
 
 	<T> T querySingleForSql(String sql, Object param, Class<T> clazz);
 
-	<T> T querySingleByField(String fieldName,String fieldValue, Class<T> clazz);
-
 	<T> Pager queryPageForSql(String sql, Map<String, Object> param, Pager pager, Class<T> clazz);
 
 	<T> List<T> queryListForSql(String sql, Map<String, Object> param, Class<T> clazz);
 
 	<T> T querySingleForSql(String sql, Map<String, Object> param, Class<T> clazz);
-	
+
+	<PO> PO querySingleByField(String fieldName,String fieldValue, Class<PO> clazz);
+
 	<PO> Serializable insertPO(PO po, boolean autoCreateId);
 	
 	<PO> Serializable batchInsertPO(List<PO> pos, boolean autoCreateId);

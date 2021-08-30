@@ -171,10 +171,10 @@ public class MyBeanPropertyRowMapper<T> implements RowMapper<T> {
         this.mappedFields = new HashMap<>();
         this.mappedProperties = new HashSet<>();
 
-        TableInfo tableInfo = TableInfoBuilder.getTableInfo(mappedClass);
-        if(tableInfo!=null){
+        try {
+            TableInfo tableInfo = TableInfoBuilder.getTableInfo(mappedClass);
             for (Field field : tableInfo.getFieldList()) {
-                String name = null;
+                String name;
                 if(field.getName().equals(tableInfo.getPkFieldName())){
                     name =tableInfo.getPkColumnName();
                 }else{
@@ -191,7 +191,7 @@ public class MyBeanPropertyRowMapper<T> implements RowMapper<T> {
                 }
                 this.mappedProperties.add(field.getName());
             }
-        }else{
+        }catch(Exception e){
             for (PropertyDescriptor pd : BeanUtils.getPropertyDescriptors(mappedClass)) {
                 if (pd.getWriteMethod() != null) {
                     String lowerCaseName = lowerCaseName(pd.getName());
