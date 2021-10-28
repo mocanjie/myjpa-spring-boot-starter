@@ -17,7 +17,7 @@ import javax.annotation.PostConstruct;
 import javax.sql.DataSource;
 
 @Configuration
-public class AutoConfiguration {
+public class MyJpaAutoConfiguration {
 
 
     @Value("${myjpa.showsql:true}")
