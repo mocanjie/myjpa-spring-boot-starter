@@ -9,16 +9,17 @@ import io.github.mocanjie.base.myjpa.dao.impl.BaseDaoImpl;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
+import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.util.StringUtils;
+import org.springframework.context.annotation.Primary;
 
 import javax.annotation.PostConstruct;
 import javax.sql.DataSource;
 
 @Configuration
+@ConfigurationProperties(prefix ="myjpa.showsql")
 public class MyJpaAutoConfiguration {
-
 
     @Value("${myjpa.showsql:true}")
     public boolean showSql;
@@ -29,6 +30,7 @@ public class MyJpaAutoConfiguration {
     }
 
     @Bean
+    @Primary
     public IBaseDao getBaseDaoImpl(){
         return new BaseDaoImpl();
     }

@@ -34,7 +34,7 @@ public class SqlParser {
                 try {
                     PropertyDescriptor propertyDescriptor = BeanUtils.getPropertyDescriptor(obj.getClass(), f.getName());
                     Object value =  propertyDescriptor.getReadMethod().invoke(obj);
-                    if (value == null) return false;
+                    if (value == null || String.valueOf(value).equalsIgnoreCase("null")) return false;
                     if (value instanceof String) return StringUtils.isNotBlank((String) value);
                     return true;
                 } catch (Exception e) {
@@ -66,7 +66,7 @@ public class SqlParser {
                 try {
                     PropertyDescriptor propertyDescriptor = BeanUtils.getPropertyDescriptor(obj.getClass(), f.getName());
                     Object value =  propertyDescriptor.getReadMethod().invoke(obj);
-                    if (value == null) return false;
+                    if (value == null || String.valueOf(value).equalsIgnoreCase("null")) return false;
                     if (value instanceof String) return StringUtils.isNotBlank((String) value);
                     return true;
                 } catch (Exception e) {}

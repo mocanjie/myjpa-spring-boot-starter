@@ -59,7 +59,7 @@ public class BaseDaoImpl implements IBaseDao {
 	}
 	
 	@Override
-	public <T> Pager queryPageForSql(String sql, Object param, Pager pager, Class<T> clazz) {
+	public <T> Pager<T> queryPageForSql(String sql, Object param, Pager<T> pager, Class<T> clazz) {
 		SqlParameterSource sps = null;
 		if(param==null){
 			sps = new EmptySqlParameterSource();
@@ -91,7 +91,7 @@ public class BaseDaoImpl implements IBaseDao {
 	}
 
 	@Override
-	public <T> Pager queryPageForSql(String sql, Map<String, Object> param, Pager pager, Class<T> clazz) {
+	public <T> Pager<T> queryPageForSql(String sql, Map<String, Object> param, Pager<T> pager, Class<T> clazz) {
 		SqlParameterSource sps = (param==null|| param.isEmpty())? new EmptySqlParameterSource():new MapSqlParameterSource(param);
 		pager.setPageData(this.queryListForSql(SqlBuilder.buildPagerSql(sql,pager),param,clazz));
 		if(!pager.getIgnoreCount()) {
