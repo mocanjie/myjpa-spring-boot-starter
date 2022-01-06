@@ -2,6 +2,7 @@ package io.github.mocanjie.base.myjpa.configuration;
 
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.LoggerContext;
+import io.github.mocanjie.base.mycommon.aspect.RequestParamValidAspect;
 import io.github.mocanjie.base.myjpa.builder.SqlBuilder;
 import io.github.mocanjie.base.myjpa.builder.TableInfoBuilder;
 import io.github.mocanjie.base.myjpa.dao.IBaseDao;
@@ -36,10 +37,17 @@ public class MyJpaAutoConfiguration {
     }
 
     @Bean
+    public RequestParamValidAspect getRequestParamValidAspect(){
+        return new RequestParamValidAspect();
+    }
+
+    @Bean
     @ConditionalOnClass(DataSource.class)
     public SqlBuilder getSqlBuilder(){
         return new SqlBuilder();
     }
+
+
 
 
     @PostConstruct
