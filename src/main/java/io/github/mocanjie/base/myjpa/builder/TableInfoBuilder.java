@@ -6,6 +6,8 @@ import io.github.mocanjie.base.myjpa.metadata.TableInfo;
 import io.github.mocanjie.base.myjpa.utils.MyReflectionUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.reflections.Reflections;
+import org.springframework.beans.factory.config.BeanPostProcessor;
+import org.springframework.core.Ordered;
 
 import javax.annotation.PostConstruct;
 import java.lang.reflect.Field;
@@ -15,7 +17,7 @@ import java.util.Map;
 import java.util.Set;
 
 @Slf4j
-public class TableInfoBuilder{
+public class TableInfoBuilder implements BeanPostProcessor, Ordered {
 
     private static final Map<Class<?>, TableInfo> tableInfoMap = new HashMap<>();
 
@@ -55,4 +57,8 @@ public class TableInfoBuilder{
     }
 
 
+    @Override
+    public int getOrder() {
+        return 0;
+    }
 }
