@@ -50,7 +50,7 @@ public class SqlParser {
             if(fName.equals(tableInfo.getDelFieldName())) return tableInfo.getDelColumnName();
             MyField annotation = f.getAnnotation(MyField.class);
             if(annotation!=null && StringUtils.isNotBlank(annotation.value())) return annotation.value().trim();
-            return CommonUtils.camelCaseToUnderscore(fName);
+            return CommonUtils.camelCaseToUnderscore(String.format("`%s`",fName));
         }).collect(Collectors.joining(","));
         String values = valueList.stream().map(n->":"+n).collect(Collectors.joining(","));
         return String.format(INSERT_SQL,tableInfo.getTableName(),columns,values);
