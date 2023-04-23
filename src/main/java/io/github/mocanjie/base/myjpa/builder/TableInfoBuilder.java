@@ -6,6 +6,10 @@ import io.github.mocanjie.base.myjpa.metadata.TableInfo;
 import io.github.mocanjie.base.myjpa.utils.MyReflectionUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.reflections.Reflections;
+import org.reflections.scanners.SubTypesScanner;
+import org.reflections.scanners.TypeAnnotationsScanner;
+import org.reflections.util.ClasspathHelper;
+import org.reflections.util.ConfigurationBuilder;
 import org.springframework.beans.factory.config.BeanPostProcessor;
 import org.springframework.core.Ordered;
 
@@ -24,11 +28,15 @@ public class TableInfoBuilder implements BeanPostProcessor, Ordered {
     @PostConstruct
     private void init() {
         log.info("初始化@MyTable信息...");
-        Reflections reflections = new Reflections();
+        Reflections reflections = new Reflections(new ConfigurationBuilder()
+                .setUrls(ClasspathHelper.forJavaClassPath())
+                .setScanners(new SubTypesScanner(), new TypeAnnotationsScanner()));
         Set<Class<?>> classSet = reflections.getTypesAnnotatedWith(MyTable.class);
+        log.info("共找到@MyTable注解的类{}个",classSet.size());
         Iterator<Class<?>> iterator = classSet.iterator();
         while (iterator.hasNext()){
             Class<?> aClass = iterator.next();
+            log.info("{}",aClass.toString());
             MyTable annotation = aClass.getAnnotation(MyTable.class);
             Field pkField = null;
             try {
