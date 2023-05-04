@@ -28,9 +28,18 @@ public class TableInfoBuilder implements BeanPostProcessor, Ordered {
     @PostConstruct
     private void init() {
         log.info("初始化@MyTable信息...");
-        Reflections reflections = new Reflections(new ConfigurationBuilder()
-                .setUrls(ClasspathHelper.forJavaClassPath())
-                .setScanners(new SubTypesScanner(), new TypeAnnotationsScanner()));
+        Reflections reflections = null;
+        String osName = System.getProperty("os.name");
+        log.info("系统信息:{}",osName);
+        if (osName.contains("Mac")) {
+            // Mac系统
+            reflections = new Reflections(new ConfigurationBuilder()
+                    .setUrls(ClasspathHelper.forJavaClassPath())
+                    .setScanners(new SubTypesScanner(), new TypeAnnotationsScanner()));
+        } else {
+            // 其他
+            reflections = new Reflections();
+        }
         Set<Class<?>> classSet = reflections.getTypesAnnotatedWith(MyTable.class);
         log.info("共找到@MyTable注解的类{}个",classSet.size());
         Iterator<Class<?>> iterator = classSet.iterator();

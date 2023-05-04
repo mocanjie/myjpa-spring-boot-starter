@@ -16,6 +16,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.SingleColumnRowMapper;
 import org.springframework.jdbc.core.namedparam.*;
+import org.springframework.jdbc.support.GeneratedKeyHolder;
+import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.lang.Nullable;
 
 import javax.annotation.Resource;
@@ -118,12 +120,18 @@ public class BaseDaoImpl implements IBaseDao {
 	public <PO> Serializable insertPO(PO po, boolean autoCreateId) {
 		try{
 			TableInfo tableInfo = TableInfoBuilder.getTableInfo(po.getClass());
+			SqlParameterSource paramSource = new BeanPropertySqlParameterSource(po);
 			if(autoCreateId) {
 				tableInfo.setPkValue(po);
+				namedParameterJdbcTemplate.update(SqlParser.getInsertSql(tableInfo,po), paramSource);
+				return (Serializable) tableInfo.getPkValue(po);
+			}else{
+				KeyHolder holder = new GeneratedKeyHolder();
+				namedParameterJdbcTemplate.update(SqlParser.getInsertSql(tableInfo,po), paramSource,holder);
+				long id = holder.getKey().longValue();
+				tableInfo.setPkValue(po,id);
+				return id;
 			}
-			SqlParameterSource paramSource = new BeanPropertySqlParameterSource(po);
-			namedParameterJdbcTemplate.update(SqlParser.getInsertSql(tableInfo,po), paramSource);
-			return (Serializable) tableInfo.getPkValue(po);
 		}catch(Exception e){
 			log.error("插入异常",e);
 			if(e instanceof DuplicateKeyException){
@@ -227,7 +235,7 @@ public class BaseDaoImpl implements IBaseDao {
 				beanList.add(po);
 			}
 			SqlParameterSource[] params = SqlParameterSourceUtils.createBatch(beanList);
-			namedParameterJdbcTemplate.batchUpdate(sql, params);
+			namedParameterJdbcTemplate.batchUpdate(sql,params);
 		}catch(Exception e) {
 			log.error("批量新增异常",e);
 			throw new BusinessException("系统错误,请联系管理员");

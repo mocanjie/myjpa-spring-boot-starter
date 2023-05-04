@@ -32,6 +32,14 @@ public class TableInfo {
         throw new BusinessException(String.format("没有找到%s变量",fieldName));
     }
 
+    public void setPkValue(Object obj, Object value){
+        try {
+            PropertyDescriptor propertyDescriptor = BeanUtils.getPropertyDescriptor(obj.getClass(), this.pkField.getName());
+            propertyDescriptor.getWriteMethod().invoke(obj,value);
+        }catch (Exception e){
+        }
+    }
+
     public void setPkValue(Object obj){
         try {
             Object value = ConvertUtils.convert(IdGen.get().nextId(), this.pkField.getType());
