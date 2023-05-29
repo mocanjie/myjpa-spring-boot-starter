@@ -131,5 +131,15 @@ public class BaseServiceImpl implements IBaseService {
 	public <PO> Serializable batchInsertPO(List<PO> pos) {
 		return baseDao.batchInsertPO(pos, true);
 	}
-	
+
+	@Override
+	public <PO> Serializable batchInsertPO(List<PO> pos, boolean autoCreateId, int batchSize) {
+		return baseDao.batchInsertPO(pos, autoCreateId, batchSize);
+	}
+
+	@Override
+	public <PO> Serializable batchInsertPO(List<PO> pos, int batchSize) {
+		return this.batchInsertPO(pos, true, batchSize);
+	}
+
 }

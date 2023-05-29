@@ -69,10 +69,14 @@ public class BaseDaoImpl implements IBaseDao {
 			sps = new BeanPropertySqlParameterSource(param);
 		}
 		String pagerSql = SqlBuilder.buildPagerSql(sql,pager);
-		pager.setPageData(this.queryListForSql(pagerSql,param,clazz));
 		if(!pager.getIgnoreCount()) {
 			String countSql = "select count(*) from ( "+sql+" ) mkt_page_count";
 			pager.setTotalRows(namedParameterJdbcTemplate.queryForObject(countSql, sps, new SingleColumnRowMapper<Long>(Long.class)));
+		}
+		if(pager.getTotalRows()>0){
+			pager.setPageData(this.queryListForSql(pagerSql,param,clazz));
+		}else{
+			pager.setPageData(new ArrayList<T>());
 		}
 		return pager;
 	}
@@ -95,10 +99,14 @@ public class BaseDaoImpl implements IBaseDao {
 	@Override
 	public <T> Pager<T> queryPageForSql(String sql, Map<String, Object> param, Pager<T> pager, Class<T> clazz) {
 		SqlParameterSource sps = (param==null|| param.isEmpty())? new EmptySqlParameterSource():new MapSqlParameterSource(param);
-		pager.setPageData(this.queryListForSql(SqlBuilder.buildPagerSql(sql,pager),param,clazz));
 		if(!pager.getIgnoreCount()) {
 			String countSql = "select count(*) from ( "+sql+" ) mkt_page_count";
 			pager.setTotalRows(namedParameterJdbcTemplate.queryForObject(countSql, sps, new SingleColumnRowMapper<Long>(Long.class)));
+		}
+		if(pager.getTotalRows()>0){
+			pager.setPageData(this.queryListForSql(SqlBuilder.buildPagerSql(sql,pager),param,clazz));
+		}else{
+			pager.setPageData(new ArrayList<T>());
 		}
 		return pager;
 	}
@@ -239,6 +247,21 @@ public class BaseDaoImpl implements IBaseDao {
 		}catch(Exception e) {
 			log.error("批量新增异常",e);
 			throw new BusinessException("系统错误,请联系管理员");
+		}
+		return null;
+	}
+
+	@Override
+	public <PO> Serializable batchInsertPO(List<PO> pos, boolean autoCreateId, int batchSize) {
+		int totalSize = pos.size();
+		int batchCount = (int) Math.ceil((double) totalSize / batchSize);
+		int currentIndex = 0;
+		for (int i = 0; i < batchCount; i++) {
+			int remainingSize = totalSize - currentIndex;
+			int currentBatchSize = Math.min(batchSize, remainingSize);
+			List<PO> batchList = pos.subList(currentIndex, currentIndex + currentBatchSize);
+			this.batchInsertPO(batchList,autoCreateId);
+			currentIndex += currentBatchSize;
 		}
 		return null;
 	}

@@ -32,6 +32,10 @@ public interface IBaseService {
 
 	<PO> Serializable batchInsertPO(List<PO> pos);
 
+	<PO> Serializable batchInsertPO(List<PO> pos, boolean autoCreateId, int batchSize);
+
+	<PO> Serializable batchInsertPO(List<PO> pos, int batchSize);
+
 	<PO> int updatePO(PO po);
 
 	<PO> int updatePO(PO po,boolean ignoreNull);

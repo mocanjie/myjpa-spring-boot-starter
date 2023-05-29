@@ -27,6 +27,8 @@ public interface IBaseDao {
 	<PO> Serializable insertPO(PO po, boolean autoCreateId);
 	
 	<PO> Serializable batchInsertPO(List<PO> pos, boolean autoCreateId);
+
+	<PO> Serializable batchInsertPO(List<PO> pos, boolean autoCreateId, int batchSize);
 	
 	<PO> int updatePO(PO po);
 	
