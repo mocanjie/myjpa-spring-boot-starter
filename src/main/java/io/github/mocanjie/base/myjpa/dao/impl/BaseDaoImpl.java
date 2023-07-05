@@ -136,6 +136,7 @@ public class BaseDaoImpl implements IBaseDao {
 			}else{
 				Object pkValue = tableInfo.getPkValue(po);
 				if(pkValue!=null){
+					namedParameterJdbcTemplate.update(SqlParser.getInsertSql(tableInfo,po), paramSource);
 					return (Serializable) pkValue;
 				}
 				KeyHolder holder = new GeneratedKeyHolder();
