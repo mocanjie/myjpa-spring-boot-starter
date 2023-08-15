@@ -15,7 +15,7 @@ public class SqlBuilder {
 
 	protected  Logger logger = LoggerFactory.getLogger(getClass());
 
-	static int type = 1;
+	public static int type = 1;
 
 	public static String db_schema;
 
@@ -32,17 +32,22 @@ public class SqlBuilder {
 			version = CnvSmallChr(ds.getConnection().getMetaData().getDatabaseProductVersion());
 			connection = ds.getConnection();
 			db_schema = connection.getCatalog();
-			if ("mysql".equals(typeName)) {
+			if ("mysql".equalsIgnoreCase(typeName)) {
 				type = 1;
-		    }else if ("oracle".equals(typeName)) {
+		    }else if ("oracle".equalsIgnoreCase(typeName)) {
 		    	type = 2;
-		    }else if (("sqlserver".equals(typeName)) || (typeName.contains("microsoft"))) {
+		    }else if (("sqlserver".equalsIgnoreCase(typeName)) || (typeName.contains("microsoft"))) {
 		    	type = 3;
-		    }else{
-		    	throw new BusinessException("不支持数据库类型" + typeName);
+		    }
+			else if (("kingbasees".equalsIgnoreCase(typeName))) {
+				type = 4;
+			}else{
+//		    	throw new Error("不支持数据库类型：" + typeName);
+				logger.info("没匹对正确的数据库版本，默认使用mysql模式");
 		    }
 		}catch(Exception e){
 			logger.error("获取数据库类型异常",e);
+			throw new Error("myjpa组件加载失败");
 		} finally {
 			if(connection != null) {
 				try {
@@ -71,7 +76,7 @@ public class SqlBuilder {
 	  }
 
 	public static String buildPagerSql(String sql, Pager pager){
-		if(type==1){
+		if(type==1 || type==4){
 			return  buildMysqlPagerSql(sql, pager);
 		}
 		if(type==2){
