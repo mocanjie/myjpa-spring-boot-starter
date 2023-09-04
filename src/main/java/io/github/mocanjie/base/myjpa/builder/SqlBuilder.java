@@ -28,9 +28,9 @@ public class SqlBuilder {
 		String version = null;
 		Connection connection = null;
 		try{
-			typeName = CnvSmallChr(ds.getConnection().getMetaData().getDatabaseProductName());
-			version = CnvSmallChr(ds.getConnection().getMetaData().getDatabaseProductVersion());
 			connection = ds.getConnection();
+			typeName = CnvSmallChr(connection.getMetaData().getDatabaseProductName());
+			version = CnvSmallChr(connection.getMetaData().getDatabaseProductVersion());
 			db_schema = connection.getCatalog();
 			if ("mysql".equalsIgnoreCase(typeName)) {
 				type = 1;
