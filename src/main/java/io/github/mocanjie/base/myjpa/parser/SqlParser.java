@@ -62,6 +62,8 @@ public class SqlParser {
             if(forceUpdateFields!=null && forceUpdateFields.length>0 && Arrays.asList(forceUpdateFields).contains(f.getName())){
                 return true;
             }
+            MyField annotation = f.getAnnotation(MyField.class);
+            if(annotation!=null && !annotation.serialize()) return false;
             if(ignoreNull){
                 try {
                     PropertyDescriptor propertyDescriptor = BeanUtils.getPropertyDescriptor(obj.getClass(), f.getName());
