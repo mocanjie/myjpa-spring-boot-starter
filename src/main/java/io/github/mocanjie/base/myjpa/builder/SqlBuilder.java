@@ -17,7 +17,7 @@ public class SqlBuilder {
 
 	public static int type = 1;
 
-	public static String db_schema;
+//	public static String db_schema;
 
 	@Autowired
 	private DataSource ds;
@@ -31,7 +31,7 @@ public class SqlBuilder {
 			connection = ds.getConnection();
 			typeName = CnvSmallChr(connection.getMetaData().getDatabaseProductName());
 			version = CnvSmallChr(connection.getMetaData().getDatabaseProductVersion());
-			db_schema = connection.getCatalog();
+//			db_schema = connection.getCatalog();
 			if ("mysql".equalsIgnoreCase(typeName)) {
 				type = 1;
 		    }else if ("oracle".equalsIgnoreCase(typeName)) {
