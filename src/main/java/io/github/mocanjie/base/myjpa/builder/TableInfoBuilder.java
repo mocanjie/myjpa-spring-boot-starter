@@ -38,7 +38,8 @@ public class TableInfoBuilder implements BeanPostProcessor, Ordered {
                     .setScanners(new SubTypesScanner(), new TypeAnnotationsScanner()));
         } else {
             // 其他
-            reflections = new Reflections();
+//            reflections = new Reflections();
+            reflections = new Reflections("", new TypeAnnotationsScanner(), new SubTypesScanner());
         }
         Set<Class<?>> classSet = reflections.getTypesAnnotatedWith(MyTable.class);
         log.info("共找到@MyTable注解的类{}个",classSet.size());
