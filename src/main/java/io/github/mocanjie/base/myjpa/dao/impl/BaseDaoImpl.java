@@ -72,11 +72,13 @@ public class BaseDaoImpl implements IBaseDao {
 		if(!pager.getIgnoreCount()) {
 			String countSql = "select count(*) from ( "+sql+" ) mkt_page_count";
 			pager.setTotalRows(namedParameterJdbcTemplate.queryForObject(countSql, sps, new SingleColumnRowMapper<Long>(Long.class)));
-		}
-		if(pager.getTotalRows()>0){
-			pager.setPageData(this.queryListForSql(pagerSql,param,clazz));
+			if(pager.getTotalRows()>0){
+				pager.setPageData(this.queryListForSql(pagerSql,param,clazz));
+			}else{
+				pager.setPageData(new ArrayList<T>());
+			}
 		}else{
-			pager.setPageData(new ArrayList<T>());
+			pager.setPageData(this.queryListForSql(pagerSql,param,clazz));
 		}
 		return pager;
 	}
