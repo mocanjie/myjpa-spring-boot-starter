@@ -18,8 +18,8 @@ public class SqlParser {
     public static final String UPDATE_SQL = "UPDATE %s SET %s WHERE %s=:%s";
     public static final String SELECT_BY_SQL = "SELECT * FROM %s WHERE %s=:%s";
     public static final String DEL_BYID_SQL = "DELETE FROM %s WHERE %s=?";
-    public static final String DEL_BYIDS_SQL = "DELETE FROM %s WHERE %s =:%s";
-    public static final String DEL_BYIDS_LOGIC_SQL = "UPDATE %s SET %s = %s WHERE %s =:%s";
+    public static final String DEL_BYIDS_SQL = "DELETE FROM %s WHERE %s in (:%s)";
+    public static final String DEL_BYIDS_LOGIC_SQL = "UPDATE %s SET %s = %s WHERE %s in (:%s)";
 
     public static String getInsertSql(TableInfo tableInfo, Object obj){
         return getInsertSql(tableInfo,obj,true);
