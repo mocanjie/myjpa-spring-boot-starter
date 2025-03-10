@@ -1,6 +1,5 @@
 package io.github.mocanjie.base.myjpa.builder;
 
-import io.github.mocanjie.base.mycommon.exception.BusinessException;
 import io.github.mocanjie.base.mycommon.pager.Pager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -41,7 +40,11 @@ public class SqlBuilder {
 		    }
 			else if (("kingbasees".equalsIgnoreCase(typeName))) {
 				type = 4;
-			}else{
+			}
+			else if (("postgresql".equalsIgnoreCase(typeName))) {
+				type = 5;
+			}
+			else{
 //		    	throw new Error("不支持数据库类型：" + typeName);
 				logger.info("没匹对正确的数据库版本，默认使用mysql模式");
 		    }
@@ -85,6 +88,9 @@ public class SqlBuilder {
 		if(type==3){
 			return  buildSqlServerPagerSql(sql, pager);
 		}
+		if(type==5){
+			return  buildPgsqlPagerSql(sql, pager);
+		}
 		//默认
 		return buildMysqlPagerSql(sql, pager);
 	}
@@ -109,6 +115,25 @@ public class SqlBuilder {
 	    }
 	    pagingSelect.append(" ) t )tt )ttt where tempRowNumber > ").append(pager.getStartRow()).append(" and tempRowNumber <= ").append(pager.getStartRow() + pager.getPageSize());
 	    return pagingSelect.toString();
+	}
+
+	/**
+	 * mysql
+	 * @param sql
+	 * @param pager
+	 * @return
+	 */
+	private static String buildPgsqlPagerSql(String sql,Pager pager){
+		StringBuilder pagingSelect = new StringBuilder(300);
+		pagingSelect.append(" select * from ( ");
+		pagingSelect.append(sql);
+		pagingSelect.append(" ) as _pgsqltb_ ");
+		String sortColumn = pager.getSort();
+		if(StringUtils.hasText(sortColumn) && StringUtils.hasText(pager.getOrder())){
+			pagingSelect.append(" order by " + camelCaseToUnderscore(sortColumn) +" " + pager.getOrder());
+		}
+		pagingSelect.append(" OFFSET ").append(pager.getStartRow()).append(" LIMIT ").append(pager.getPageSize());
+		return pagingSelect.toString();
 	}
 
 	/**
