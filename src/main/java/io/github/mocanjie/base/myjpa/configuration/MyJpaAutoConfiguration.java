@@ -1,13 +1,14 @@
 package io.github.mocanjie.base.myjpa.configuration;
 
-import ch.qos.logback.classic.Level;
-import ch.qos.logback.classic.LoggerContext;
 import io.github.mocanjie.base.myjpa.builder.SqlBuilder;
 import io.github.mocanjie.base.myjpa.builder.TableInfoBuilder;
 import io.github.mocanjie.base.myjpa.dao.IBaseDao;
 import io.github.mocanjie.base.myjpa.dao.impl.BaseDaoImpl;
 import io.github.mocanjie.base.myjpa.service.IBaseService;
 import io.github.mocanjie.base.myjpa.service.impl.BaseServiceImpl;
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.core.LoggerContext;
+import org.apache.logging.log4j.core.config.Configurator;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.config.BeanPostProcessor;
@@ -56,11 +57,11 @@ public class MyJpaAutoConfiguration implements BeanPostProcessor, Ordered {
 
     @PostConstruct
     void logInit(){
-        LoggerContext loggerContext = (LoggerContext) LoggerFactory.getILoggerFactory();
-        loggerContext.getLogger("org.reflections").setLevel(Level.ERROR);
-        if(showSql){
-            loggerContext.getLogger("org.springframework.jdbc.core.JdbcTemplate").setLevel(Level.DEBUG);
-            loggerContext.getLogger("org.springframework.jdbc.core.StatementCreatorUtils").setLevel(Level.TRACE);
+        Configurator.setLevel("org.reflections", Level.ERROR);
+
+        if (showSql) {
+            Configurator.setLevel("org.springframework.jdbc.core.JdbcTemplate", Level.DEBUG);
+            Configurator.setLevel("org.springframework.jdbc.core.StatementCreatorUtils", Level.TRACE);
         }
     }
 
