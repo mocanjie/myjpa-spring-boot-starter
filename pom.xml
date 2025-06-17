@@ -4,7 +4,7 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>io.github.mocanjie</groupId>
     <artifactId>myjpa-spring-boot-starter</artifactId>
-    <version>202506170928</version>
+    <version>202506170928-log4j</version>
     <packaging>jar</packaging>
     <name>${project.artifactId}-${project.version}</name>
     <description>${project.artifactId}-${project.version}</description>
