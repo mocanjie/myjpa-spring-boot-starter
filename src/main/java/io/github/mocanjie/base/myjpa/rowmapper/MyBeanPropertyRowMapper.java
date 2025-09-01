@@ -177,6 +177,9 @@ public class MyBeanPropertyRowMapper<T> implements RowMapper<T> {
                 String name;
                 if(field.getName().equals(tableInfo.getPkFieldName())){
                     name =tableInfo.getPkColumnName();
+                }else if(field.getName().equals(tableInfo.getDelFieldName())){
+                    // 处理删除字段：使用delColumn作为列名
+                    name = tableInfo.getDelColumnName();
                 }else{
                     MyField annotation = field.getAnnotation(MyField.class);
                     name = (annotation!=null&&StringUtils.hasText(annotation.value()))?

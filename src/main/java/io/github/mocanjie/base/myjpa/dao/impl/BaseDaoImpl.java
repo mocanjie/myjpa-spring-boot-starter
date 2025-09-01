@@ -6,6 +6,7 @@ import io.github.mocanjie.base.myjpa.builder.SqlBuilder;
 import io.github.mocanjie.base.myjpa.builder.TableInfoBuilder;
 import io.github.mocanjie.base.myjpa.dao.IBaseDao;
 import io.github.mocanjie.base.myjpa.metadata.TableInfo;
+import io.github.mocanjie.base.myjpa.parser.JSqlDynamicSqlParser;
 import io.github.mocanjie.base.myjpa.parser.SqlParser;
 import io.github.mocanjie.base.myjpa.rowmapper.MyBeanPropertyRowMapper;
 import org.slf4j.Logger;
@@ -31,6 +32,37 @@ import java.util.Map;
 public class BaseDaoImpl implements IBaseDao {
 
 	protected static Logger log = LoggerFactory.getLogger(BaseDaoImpl.class);
+	
+	
+	/**
+	 * 使用JSqlParser处理删除条件
+	 */
+	private String processDeleteCondition(String sql) {
+		String processedSql = JSqlDynamicSqlParser.appendDeleteCondition(sql);
+		
+		if (log.isDebugEnabled()) {
+			log.debug("Using JSqlParser");
+			log.debug("Original SQL: {}", sql);
+			log.debug("Processed SQL: {}", processedSql);
+		}
+		
+		return processedSql;
+	}
+	
+	/**
+	 * 使用JSqlParser处理实体类删除条件
+	 */
+	private String processDeleteConditionForEntity(String sql, Class<?> entityClass, String tableAlias) {
+		String processedSql = JSqlDynamicSqlParser.appendDeleteConditionForEntity(sql, entityClass, tableAlias);
+		
+		if (log.isDebugEnabled()) {
+			log.debug("Using JSqlParser for entity {}", entityClass.getName());
+			log.debug("Original SQL: {}", sql);
+			log.debug("Processed SQL: {}", processedSql);
+		}
+		
+		return processedSql;
+	}
 
 	public boolean isWrapClass(Class<?> clz) {
 		return BeanUtils.isSimpleValueType(clz) || clz == java.sql.Date.class;
@@ -273,6 +305,161 @@ public class BaseDaoImpl implements IBaseDao {
 			currentIndex += currentBatchSize;
 		}
 		return null;
+	}
+
+	// ======================= 新增支持动态拼接删除条件的查询方法实现 =======================
+	
+	@Override
+	public <T> List<T> queryListForSqlWithDeleteCondition(String sql, Object param, Class<T> clazz) {
+		String processedSql = processDeleteCondition(sql);
+		return queryListForSql(processedSql, param, clazz);
+	}
+
+	@Override
+	public <T> List<T> queryListForSqlWithDeleteCondition(String sql, Map<String, Object> param, Class<T> clazz) {
+		String processedSql = processDeleteCondition(sql);
+		return queryListForSql(processedSql, param, clazz);
+	}
+
+	@Override
+	public <T> T querySingleForSqlWithDeleteCondition(String sql, Object param, Class<T> clazz) {
+		String processedSql = processDeleteCondition(sql);
+		if (log.isDebugEnabled()) {
+			log.debug("Original SQL: {}", sql);
+			log.debug("Processed SQL: {}", processedSql);
+		}
+		return querySingleForSql(processedSql, param, clazz);
+	}
+
+	@Override
+	public <T> T querySingleForSqlWithDeleteCondition(String sql, Map<String, Object> param, Class<T> clazz) {
+		String processedSql = processDeleteCondition(sql);
+		if (log.isDebugEnabled()) {
+			log.debug("Original SQL: {}", sql);
+			log.debug("Processed SQL: {}", processedSql);
+		}
+		return querySingleForSql(processedSql, param, clazz);
+	}
+
+	@Override
+	public <T> Pager<T> queryPageForSqlWithDeleteCondition(String sql, Object param, Pager<T> pager, Class<T> clazz) {
+		String processedSql = processDeleteCondition(sql);
+		if (log.isDebugEnabled()) {
+			log.debug("Original SQL: {}", sql);
+			log.debug("Processed SQL: {}", processedSql);
+		}
+		return queryPageForSql(processedSql, param, pager, clazz);
+	}
+
+	@Override
+	public <T> Pager<T> queryPageForSqlWithDeleteCondition(String sql, Map<String, Object> param, Pager<T> pager, Class<T> clazz) {
+		String processedSql = processDeleteCondition(sql);
+		if (log.isDebugEnabled()) {
+			log.debug("Original SQL: {}", sql);
+			log.debug("Processed SQL: {}", processedSql);
+		}
+		return queryPageForSql(processedSql, param, pager, clazz);
+	}
+
+	@Override
+	public <T> List<T> queryListForSqlWithEntityDeleteCondition(String sql, Object param, Class<T> clazz, Class<?> entityClass, String tableAlias) {
+		String processedSql = processDeleteConditionForEntity(sql, entityClass, tableAlias);
+		if (log.isDebugEnabled()) {
+			log.debug("Original SQL: {}", sql);
+			log.debug("Processed SQL: {}", processedSql);
+			log.debug("Entity Class: {}, Table Alias: {}", entityClass.getName(), tableAlias);
+		}
+		return queryListForSql(processedSql, param, clazz);
+	}
+
+	@Override
+	public <T> List<T> queryListForSqlWithEntityDeleteCondition(String sql, Map<String, Object> param, Class<T> clazz, Class<?> entityClass, String tableAlias) {
+		String processedSql = processDeleteConditionForEntity(sql, entityClass, tableAlias);
+		if (log.isDebugEnabled()) {
+			log.debug("Original SQL: {}", sql);
+			log.debug("Processed SQL: {}", processedSql);
+			log.debug("Entity Class: {}, Table Alias: {}", entityClass.getName(), tableAlias);
+		}
+		return queryListForSql(processedSql, param, clazz);
+	}
+
+	@Override
+	public <T> T querySingleForSqlWithEntityDeleteCondition(String sql, Object param, Class<T> clazz, Class<?> entityClass, String tableAlias) {
+		String processedSql = processDeleteConditionForEntity(sql, entityClass, tableAlias);
+		if (log.isDebugEnabled()) {
+			log.debug("Original SQL: {}", sql);
+			log.debug("Processed SQL: {}", processedSql);
+			log.debug("Entity Class: {}, Table Alias: {}", entityClass.getName(), tableAlias);
+		}
+		return querySingleForSql(processedSql, param, clazz);
+	}
+
+	@Override
+	public <T> T querySingleForSqlWithEntityDeleteCondition(String sql, Map<String, Object> param, Class<T> clazz, Class<?> entityClass, String tableAlias) {
+		String processedSql = processDeleteConditionForEntity(sql, entityClass, tableAlias);
+		if (log.isDebugEnabled()) {
+			log.debug("Original SQL: {}", sql);
+			log.debug("Processed SQL: {}", processedSql);
+			log.debug("Entity Class: {}, Table Alias: {}", entityClass.getName(), tableAlias);
+		}
+		return querySingleForSql(processedSql, param, clazz);
+	}
+
+	@Override
+	public <T> Pager<T> queryPageForSqlWithEntityDeleteCondition(String sql, Object param, Pager<T> pager, Class<T> clazz, Class<?> entityClass, String tableAlias) {
+		String processedSql = processDeleteConditionForEntity(sql, entityClass, tableAlias);
+		if (log.isDebugEnabled()) {
+			log.debug("Original SQL: {}", sql);
+			log.debug("Processed SQL: {}", processedSql);
+			log.debug("Entity Class: {}, Table Alias: {}", entityClass.getName(), tableAlias);
+		}
+		return queryPageForSql(processedSql, param, pager, clazz);
+	}
+
+	@Override
+	public <T> Pager<T> queryPageForSqlWithEntityDeleteCondition(String sql, Map<String, Object> param, Pager<T> pager, Class<T> clazz, Class<?> entityClass, String tableAlias) {
+		String processedSql = processDeleteConditionForEntity(sql, entityClass, tableAlias);
+		if (log.isDebugEnabled()) {
+			log.debug("Original SQL: {}", sql);
+			log.debug("Processed SQL: {}", processedSql);
+			log.debug("Entity Class: {}, Table Alias: {}", entityClass.getName(), tableAlias);
+		}
+		return queryPageForSql(processedSql, param, pager, clazz);
+	}
+
+	@Override
+	public <PO> PO queryByIdWithDeleteCondition(Object id, Class<PO> clazz) {
+		TableInfo tableInfo = TableInfoBuilder.getTableInfo(clazz);
+		String sql = SqlParser.getSelectByIdSql(tableInfo);
+		String processedSql = processDeleteCondition(sql);
+		
+		Map<String, Object> param = new HashMap<>();
+		param.put(tableInfo.getPkFieldName(), id);
+		
+		if (log.isDebugEnabled()) {
+			log.debug("queryByIdWithDeleteCondition - Original SQL: {}", sql);
+			log.debug("queryByIdWithDeleteCondition - Processed SQL: {}", processedSql);
+			log.debug("queryByIdWithDeleteCondition - ID: {}, Entity: {}", id, clazz.getName());
+		}
+		
+		return querySingleForSql(processedSql, param, clazz);
+	}
+
+	@Override
+	public <PO> PO querySingleByFieldWithDeleteCondition(String fieldName, String fieldValue, Class<PO> clazz) {
+		String sql = SqlParser.getSelectByFieldSql(TableInfoBuilder.getTableInfo(clazz), fieldName);
+		String processedSql = processDeleteCondition(sql);
+		
+		Map<String, Object> param = new HashMap<>();
+		param.put(fieldName, fieldValue);
+		
+		if (log.isDebugEnabled()) {
+			log.debug("querySingleByFieldWithDeleteCondition - Original SQL: {}", sql);
+			log.debug("querySingleByFieldWithDeleteCondition - Processed SQL: {}", processedSql);
+			log.debug("querySingleByFieldWithDeleteCondition - Field: {}, Value: {}, Entity: {}", fieldName, fieldValue, clazz.getName());
+		}
+		
+		return querySingleForSql(processedSql, param, clazz);
 	}
 
 }
