@@ -28,6 +28,7 @@ public class JSqlDynamicSqlParser {
     
     /**
      * 为SQL自动拼接逻辑删除条件
+     * 使用字符串替换方式避免JSqlParser 4.9的JOIN ON渲染问题
      * 
      * @param sql 原始SQL语句
      * @return 拼接删除条件后的SQL语句
@@ -48,7 +49,12 @@ public class JSqlDynamicSqlParser {
             Select selectStatement = (Select) statement;
             processSelectStatement(selectStatement);
             
-            return selectStatement.toString();
+            String result = selectStatement.toString();
+            
+            // 修复JSqlParser 4.9的重复ON子句问题
+            result = fixDuplicateOnClauses(result);
+            
+            return result;
             
         } catch (JSQLParserException e) {
             log.warn("解析SQL时发生异常，返回原始SQL: {}, 异常: {}", sql, e.getMessage());
@@ -60,42 +66,24 @@ public class JSqlDynamicSqlParser {
     }
     
     /**
-     * 为指定实体类的查询拼接删除条件
-     * 
-     * @param sql 原始SQL
-     * @param entityClass 实体类
-     * @param tableAlias 表别名（可选）
-     * @return 拼接删除条件后的SQL
+     * 修复JSqlParser 4.9生成的重复ON子句问题
+     * 将形如 "ON condition1 AND condition2 ON originalCondition" 修复为 "ON condition1 AND condition2"
      */
-    public static String appendDeleteConditionForEntity(String sql, Class<?> entityClass, String tableAlias) {
-        if (sql == null || sql.trim().isEmpty() || entityClass == null) {
+    private static String fixDuplicateOnClauses(String sql) {
+        if (sql == null || !sql.contains(" ON ")) {
             return sql;
         }
         
-        try {
-            Statement statement = CCJSqlParserUtil.parse(sql);
-            
-            if (!(statement instanceof Select)) {
-                return sql;
-            }
-            
-            TableCacheManager.DeleteInfo deleteInfo = TableCacheManager.getDeleteInfoByClass(entityClass);
-            if (deleteInfo == null) {
-                return sql;
-            }
-            
-            Select selectStatement = (Select) statement;
-            processSelectStatementForEntity(selectStatement, deleteInfo, tableAlias);
-            
-            return selectStatement.toString();
-            
-        } catch (JSQLParserException e) {
-            log.warn("解析SQL时发生异常，返回原始SQL: {}, 异常: {}", sql, e.getMessage());
-            return sql;
-        } catch (Exception e) {
-            log.error("为实体类{}拼接删除条件时发生异常: {}", entityClass.getName(), e.getMessage());
-            return sql;
+        // 使用正则表达式匹配并修复重复的ON子句
+        // 匹配模式：ON (conditions) ON (original_condition) 后跟WHERE/ORDER/GROUP/LIMIT等关键字或结尾
+        String pattern = "\\bON\\s+(.*?)\\s+ON\\s+.*?(?=\\s+(?:WHERE|ORDER|GROUP|LIMIT|$))";
+        String result = sql.replaceAll(pattern, "ON $1");
+        
+        if (!result.equals(sql)) {
+            log.debug("修复了重复ON子句: \n原SQL: {}\n修复后: {}", sql, result);
         }
+        
+        return result;
     }
     
     /**
@@ -120,16 +108,17 @@ public class JSqlDynamicSqlParser {
      * 处理简单SELECT语句
      */
     private static void processPlainSelect(PlainSelect plainSelect) {
-        // 收集所有需要处理的表信息
-        Map<String, TableDeleteCondition> tableConditions = new HashMap<>();
+        // 收集需要处理的表信息，按JOIN类型分类
+        List<TableDeleteCondition> whereConditions = new ArrayList<>(); // 放入WHERE的条件
+        List<TableDeleteCondition> joinConditions = new ArrayList<>();  // 放入JOIN ON的条件
         
         // 获取现有的WHERE条件，用于检查是否已包含删除条件
         Expression existingWhere = plainSelect.getWhere();
         
-        // 处理FROM子句中的表
+        // 处理FROM子句中的表（主表）
         if (plainSelect.getFromItem() instanceof Table) {
             Table table = (Table) plainSelect.getFromItem();
-            addTableCondition(tableConditions, table, existingWhere);
+            addTableConditionByType(table, existingWhere, JoinType.FROM_TABLE, null, whereConditions, joinConditions);
         } else if (plainSelect.getFromItem() instanceof ParenthesedSelect) {
             // 递归处理子查询
             ParenthesedSelect parenthesedSelect = (ParenthesedSelect) plainSelect.getFromItem();
@@ -141,7 +130,8 @@ public class JSqlDynamicSqlParser {
             for (Join join : plainSelect.getJoins()) {
                 if (join.getRightItem() instanceof Table) {
                     Table table = (Table) join.getRightItem();
-                    addTableCondition(tableConditions, table, existingWhere);
+                    JoinType joinType = getJoinType(join);
+                    addTableConditionByType(table, existingWhere, joinType, join, whereConditions, joinConditions);
                 } else if (join.getRightItem() instanceof ParenthesedSelect) {
                     // 递归处理JOIN中的子查询
                     ParenthesedSelect parenthesedSelect = (ParenthesedSelect) join.getRightItem();
@@ -150,15 +140,21 @@ public class JSqlDynamicSqlParser {
             }
         }
         
-        // 拼接删除条件到WHERE子句
-        if (!tableConditions.isEmpty()) {
-            Expression deleteConditions = buildDeleteConditionsExpression(tableConditions.values());
-            
+        // 处理WHERE条件（主表和INNER JOIN）
+        if (!whereConditions.isEmpty()) {
+            Expression whereDeleteConditions = buildDeleteConditionsExpression(whereConditions);
             Expression currentWhere = plainSelect.getWhere();
             if (currentWhere != null) {
-                plainSelect.setWhere(new AndExpression(currentWhere, deleteConditions));
+                plainSelect.setWhere(new AndExpression(currentWhere, whereDeleteConditions));
             } else {
-                plainSelect.setWhere(deleteConditions);
+                plainSelect.setWhere(whereDeleteConditions);
+            }
+        }
+        
+        // 处理JOIN ON条件（LEFT/RIGHT JOIN）
+        if (!joinConditions.isEmpty()) {
+            for (TableDeleteCondition condition : joinConditions) {
+                addDeleteConditionToJoinOn(condition);
             }
         }
         
@@ -216,48 +212,107 @@ public class JSqlDynamicSqlParser {
         // 可以根据需要添加更多表达式类型的处理
     }
     
+    
     /**
-     * 为特定实体类处理SELECT语句
+     * 根据JOIN类型添加表的删除条件信息
      */
-    private static void processSelectStatementForEntity(Select selectStatement, TableCacheManager.DeleteInfo deleteInfo, String tableAlias) {
-        if (selectStatement instanceof PlainSelect) {
-            processPlainSelectForEntity((PlainSelect) selectStatement, deleteInfo, tableAlias);
+    private static void addTableConditionByType(Table table, Expression existingWhere, JoinType joinType, Join joinObject,
+                                               List<TableDeleteCondition> whereConditions, List<TableDeleteCondition> joinConditions) {
+        String tableName = table.getName();
+        String alias = table.getAlias() != null ? table.getAlias().getName() : null;
+        
+        TableCacheManager.DeleteInfo deleteInfo = TableCacheManager.getDeleteInfoByTableName(tableName);
+        if (deleteInfo != null && deleteInfo.isValid()) {
+            // 检查现有WHERE条件中是否已包含删除字段条件
+            if (!isDeleteConditionExists(existingWhere, deleteInfo.getDelColumn(), alias, tableName)) {
+                TableDeleteCondition condition = new TableDeleteCondition(tableName, alias, deleteInfo, joinType, joinObject);
+                
+                // 根据JOIN类型决定条件放置位置
+                if (joinType == JoinType.FROM_TABLE || joinType == JoinType.INNER_JOIN) {
+                    // 主表和INNER JOIN的条件放入WHERE
+                    whereConditions.add(condition);
+                } else if (joinType == JoinType.LEFT_JOIN || joinType == JoinType.RIGHT_JOIN) {
+                    // LEFT/RIGHT JOIN的条件放入JOIN ON
+                    joinConditions.add(condition);
+                } else {
+                    // FULL JOIN 也放入WHERE（较少使用）
+                    whereConditions.add(condition);
+                }
+                
+                log.debug("表{}({})的删除条件将添加到{}", tableName, joinType, 
+                    (joinType == JoinType.LEFT_JOIN || joinType == JoinType.RIGHT_JOIN) ? "JOIN ON" : "WHERE");
+            } else {
+                log.debug("表{}的删除条件已存在，跳过自动拼接", tableName);
+            }
         }
     }
     
     /**
-     * 为特定实体类处理简单SELECT语句
+     * 获取JOIN类型
      */
-    private static void processPlainSelectForEntity(PlainSelect plainSelect, TableCacheManager.DeleteInfo deleteInfo, String tableAlias) {
-        // 检查现有WHERE条件中是否已包含删除字段条件
-        Expression existingWhere = plainSelect.getWhere();
-        if (isDeleteConditionExists(existingWhere, deleteInfo.getDelColumn(), tableAlias, null)) {
-            log.debug("SQL中已包含删除条件，跳过自动拼接");
+    private static JoinType getJoinType(Join join) {
+        if (join.isLeft()) {
+            return JoinType.LEFT_JOIN;
+        } else if (join.isRight()) {
+            return JoinType.RIGHT_JOIN;
+        } else if (join.isFull()) {
+            return JoinType.FULL_JOIN;
+        } else {
+            // 默认为INNER JOIN（包括JOIN、INNER JOIN等）
+            return JoinType.INNER_JOIN;
+        }
+    }
+    
+    /**
+     * 将删除条件添加到JOIN ON子句中
+     * 注意：JSqlParser 4.9存在重复ON子句的渲染bug，但会在最后通过regex修复
+     */
+    private static void addDeleteConditionToJoinOn(TableDeleteCondition condition) {
+        if (condition.joinObject == null) {
+            log.warn("JOIN对象为空，无法添加删除条件到ON子句");
             return;
         }
         
-        Expression deleteCondition = createDeleteConditionExpression(deleteInfo, tableAlias);
+        Expression deleteCondition = createDeleteConditionExpression(condition.deleteInfo, condition.alias);
+        Expression existingOn = condition.joinObject.getOnExpression();
         
-        if (existingWhere != null) {
-            plainSelect.setWhere(new AndExpression(existingWhere, deleteCondition));
+        log.debug("原有ON条件: {}", existingOn);
+        log.debug("要添加的删除条件: {}", deleteCondition);
+        
+        if (existingOn != null) {
+            // 检查删除条件是否已经存在于现有ON条件中
+            String deleteColumnRef = (condition.alias != null ? condition.alias : condition.tableName) + "." + condition.deleteInfo.getDelColumn();
+            if (existingOn.toString().contains(deleteColumnRef)) {
+                log.debug("表{}的删除条件已存在于ON子句中，跳过添加", condition.tableName);
+                return;
+            }
+            
+            // 直接创建AndExpression，依赖后续的regex修复来处理JSqlParser 4.9的重复ON子句问题
+            AndExpression newOnExpression = new AndExpression(existingOn, deleteCondition);
+            condition.joinObject.setOnExpression(newOnExpression);
+            
+            log.debug("组合后的ON条件: {}", newOnExpression);
         } else {
-            plainSelect.setWhere(deleteCondition);
+            condition.joinObject.setOnExpression(deleteCondition);
         }
+        
+        log.debug("已将表{}的删除条件添加到JOIN ON子句", condition.tableName);
     }
     
     /**
-     * 添加表的删除条件信息（如果尚未存在相关条件）
+     * 添加表的删除条件信息（如果尚未存在相关条件）- 保留用于兼容性
      */
+    @Deprecated
     private static void addTableCondition(Map<String, TableDeleteCondition> tableConditions, Table table, Expression existingWhere) {
         String tableName = table.getName();
         String alias = table.getAlias() != null ? table.getAlias().getName() : null;
         
         TableCacheManager.DeleteInfo deleteInfo = TableCacheManager.getDeleteInfoByTableName(tableName);
-        if (deleteInfo != null) {
+        if (deleteInfo != null && deleteInfo.isValid()) {
             // 检查现有WHERE条件中是否已包含删除字段条件
             if (!isDeleteConditionExists(existingWhere, deleteInfo.getDelColumn(), alias, tableName)) {
                 String key = alias != null ? alias : tableName;
-                tableConditions.put(key, new TableDeleteCondition(tableName, alias, deleteInfo));
+                tableConditions.put(key, new TableDeleteCondition(tableName, alias, deleteInfo, JoinType.FROM_TABLE));
             } else {
                 log.debug("表{}的删除条件已存在，跳过自动拼接", tableName);
             }
@@ -412,17 +467,36 @@ public class JSqlDynamicSqlParser {
     }
     
     /**
+     * JOIN类型枚举
+     */
+    private enum JoinType {
+        FROM_TABLE,    // 主表
+        INNER_JOIN,    // 内连接
+        LEFT_JOIN,     // 左连接
+        RIGHT_JOIN,    // 右连接
+        FULL_JOIN      // 全连接
+    }
+    
+    /**
      * 表删除条件信息
      */
     private static class TableDeleteCondition {
         final String tableName;
         final String alias;
         final TableCacheManager.DeleteInfo deleteInfo;
+        final JoinType joinType;
+        final Join joinObject; // 用于修改JOIN的ON条件
         
-        TableDeleteCondition(String tableName, String alias, TableCacheManager.DeleteInfo deleteInfo) {
+        TableDeleteCondition(String tableName, String alias, TableCacheManager.DeleteInfo deleteInfo, JoinType joinType) {
+            this(tableName, alias, deleteInfo, joinType, null);
+        }
+        
+        TableDeleteCondition(String tableName, String alias, TableCacheManager.DeleteInfo deleteInfo, JoinType joinType, Join joinObject) {
             this.tableName = tableName;
             this.alias = alias;
             this.deleteInfo = deleteInfo;
+            this.joinType = joinType;
+            this.joinObject = joinObject;
         }
     }
 }
