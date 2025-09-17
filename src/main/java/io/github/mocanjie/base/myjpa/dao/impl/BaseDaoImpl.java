@@ -21,14 +21,16 @@ import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.lang.Nullable;
 
-import javax.annotation.Resource;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Component;
+
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-
+@Component
 public class BaseDaoImpl implements IBaseDao {
 
 	protected static Logger log = LoggerFactory.getLogger(BaseDaoImpl.class);
@@ -60,7 +62,7 @@ public class BaseDaoImpl implements IBaseDao {
 	}
 	
 
-	@Resource
+	@Autowired
 	protected NamedParameterJdbcTemplate namedParameterJdbcTemplate;
 	
 	protected JdbcTemplate getJdbcTemplate(){

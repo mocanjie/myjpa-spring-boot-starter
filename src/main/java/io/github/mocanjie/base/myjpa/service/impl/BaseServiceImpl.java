@@ -7,24 +7,26 @@ import io.github.mocanjie.base.myjpa.service.IBaseService;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.lang.Nullable;
+import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import javax.annotation.Resource;
+import org.springframework.beans.factory.annotation.Autowired;
 import java.io.Serializable;
 import java.util.List;
 import java.util.Map;
 
 
 @Transactional(readOnly = true)
+@Service
 public class BaseServiceImpl implements IBaseService {
 
-	@Resource
+	@Autowired
 	protected IBaseDao baseDao;
-	
-	@Resource
+
+	@Autowired
 	protected JdbcTemplate jdbcTemplate;
-	
-	@Resource
+
+	@Autowired
 	protected NamedParameterJdbcTemplate namedParameterJdbcTemplate;
 
 	@Override

@@ -8,7 +8,7 @@ import org.springframework.core.Ordered;
 import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 
-import javax.annotation.PostConstruct;
+import jakarta.annotation.PostConstruct;
 import javax.sql.DataSource;
 import java.sql.DatabaseMetaData;
 import java.sql.ResultSet;
@@ -100,15 +100,15 @@ public class DatabaseSchemaValidator implements BeanPostProcessor, Ordered {
             // 获取表的所有列
             Set<String> columns = getTableColumns(tableName);
             
-            // 验证主键字段
+            // 验证主键字段 (忽略大小写)
             String pkColumn = getPkColumnFromCache(tableName);
-            if (pkColumn != null && !columns.contains(pkColumn.toLowerCase())) {
+            if (pkColumn != null && !containsIgnoreCase(columns, pkColumn)) {
                 result.addError(tableName, String.format("主键字段 '%s' 在表 '%s' 中不存在", pkColumn, tableName));
             }
-            
-            // 验证删除标记字段
+
+            // 验证删除标记字段 (忽略大小写)
             String delColumn = deleteInfo.getDelColumn();
-            if (delColumn != null && !delColumn.isEmpty() && !columns.contains(delColumn.toLowerCase())) {
+            if (delColumn != null && !delColumn.isEmpty() && !containsIgnoreCase(columns, delColumn)) {
                 // 标记字段为无效，不报错
                 TableCacheManager.markDeleteFieldAsInvalid(tableName);
                 result.addWarning(tableName, String.format("删除标记字段 '%s' 在表 '%s' 中不存在，已跳过删除条件拼接", delColumn, tableName));
@@ -153,19 +153,33 @@ public class DatabaseSchemaValidator implements BeanPostProcessor, Ordered {
      */
     private Set<String> getTableColumns(String tableName) throws SQLException {
         Set<String> columns = new HashSet<>();
-        
-        try (ResultSet rs = dataSource.getConnection().getMetaData().getColumns(
-                null, null, tableName.toUpperCase(), null)) {
-            
-            while (rs.next()) {
-                columns.add(rs.getString("COLUMN_NAME").toLowerCase());
+
+        // 对于MySQL，表名区分大小写，先尝试原始表名，再尝试大写和小写
+        String[] tableNameVariants = {tableName, tableName.toUpperCase(), tableName.toLowerCase()};
+
+        for (String tableNameVariant : tableNameVariants) {
+            try (ResultSet rs = dataSource.getConnection().getMetaData().getColumns(
+                    null, null, tableNameVariant, null)) {
+
+                while (rs.next()) {
+                    columns.add(rs.getString("COLUMN_NAME"));
+                }
+
+                if (!columns.isEmpty()) {
+                    log.debug("成功使用表名变体 '{}' 获取到 {} 个字段", tableNameVariant, columns.size());
+                    break;
+                }
+            } catch (SQLException e) {
+                log.debug("使用表名变体 '{}' 查询失败: {}", tableNameVariant, e.getMessage());
             }
-        } catch (SQLException e) {
+        }
+
+        if (columns.isEmpty()) {
             // 如果元数据查询失败，尝试使用SQL查询
-            log.warn("使用DatabaseMetaData查询表 '{}' 列信息失败，尝试SQL查询: {}", tableName, e.getMessage());
+            log.warn("使用DatabaseMetaData查询表 '{}' 列信息失败，尝试SQL查询", tableName);
             columns = getTableColumnsUsingSql(tableName);
         }
-        
+
         return columns;
     }
     
@@ -178,7 +192,7 @@ public class DatabaseSchemaValidator implements BeanPostProcessor, Ordered {
         try {
             String sql = buildColumnQuerySql(tableName);
             jdbcTemplate.query(sql, rs -> {
-                columns.add(rs.getString(1).toLowerCase());
+                columns.add(rs.getString(1));
             });
         } catch (DataAccessException e) {
             log.error("使用SQL查询表 '{}' 列信息也失败: {}", tableName, e.getMessage());
@@ -301,6 +315,18 @@ public class DatabaseSchemaValidator implements BeanPostProcessor, Ordered {
     private String getPkColumnFromCache(String tableName) {
         TableCacheManager.PkInfo pkInfo = TableCacheManager.getPkInfoByTableName(tableName);
         return pkInfo != null ? pkInfo.getPkColumn() : null;
+    }
+
+    /**
+     * 忽略大小写检查集合中是否包含指定字符串
+     */
+    private boolean containsIgnoreCase(Set<String> columns, String targetColumn) {
+        if (targetColumn == null) {
+            return false;
+        }
+        return columns.stream().anyMatch(column ->
+            column.equalsIgnoreCase(targetColumn)
+        );
     }
     
     /**

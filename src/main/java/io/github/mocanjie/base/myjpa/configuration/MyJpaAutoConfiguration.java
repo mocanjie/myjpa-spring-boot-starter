@@ -8,8 +8,7 @@ import io.github.mocanjie.base.myjpa.service.IBaseService;
 import io.github.mocanjie.base.myjpa.service.impl.BaseServiceImpl;
 import io.github.mocanjie.base.myjpa.validation.DatabaseSchemaValidator;
 import io.github.mocanjie.base.myjpa.validation.SchemaValidationRunner;
-import org.apache.logging.log4j.Level;
-import org.apache.logging.log4j.core.config.Configurator;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.config.BeanPostProcessor;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
@@ -22,7 +21,7 @@ import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.jdbc.core.JdbcTemplate;
 
-import javax.annotation.PostConstruct;
+import jakarta.annotation.PostConstruct;
 import javax.sql.DataSource;
 
 @Configuration
@@ -79,11 +78,37 @@ public class MyJpaAutoConfiguration implements BeanPostProcessor, Ordered {
 
     @PostConstruct
     void logInit(){
-        Configurator.setLevel("org.reflections", Level.ERROR);
+        try {
+            // 使用反射来兼容不同的日志实现
+            Object loggerContext = LoggerFactory.getILoggerFactory();
 
-        if (showSql) {
-            Configurator.setLevel("org.springframework.jdbc.core.JdbcTemplate", Level.DEBUG);
-            Configurator.setLevel("org.springframework.jdbc.core.StatementCreatorUtils", Level.TRACE);
+            // 设置 org.reflections 为 ERROR 级别
+            setLogLevel(loggerContext, "org.reflections", "ERROR");
+
+            if (showSql) {
+                // 启用 SQL 日志
+                setLogLevel(loggerContext, "org.springframework.jdbc.core.JdbcTemplate", "DEBUG");
+                setLogLevel(loggerContext, "org.springframework.jdbc.core.StatementCreatorUtils", "TRACE");
+            }
+        } catch (Exception e) {
+            // 如果日志级别设置失败，忽略
+            System.out.println("警告: 无法设置日志级别: " + e.getMessage());
+        }
+    }
+
+    private void setLogLevel(Object loggerContext, String loggerName, String level) {
+        try {
+            // 尝试 Logback 方式
+            Class<?> loggerContextClass = loggerContext.getClass();
+            if (loggerContextClass.getName().contains("logback")) {
+                Object logger = loggerContextClass.getMethod("getLogger", String.class)
+                    .invoke(loggerContext, loggerName);
+                Class<?> levelClass = Class.forName("ch.qos.logback.classic.Level");
+                Object levelObj = levelClass.getField(level).get(null);
+                logger.getClass().getMethod("setLevel", levelClass).invoke(logger, levelObj);
+            }
+        } catch (Exception e) {
+            // 静默忽略日志级别设置失败
         }
     }
 

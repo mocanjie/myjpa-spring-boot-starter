@@ -14,7 +14,7 @@ import org.reflections.util.ConfigurationBuilder;
 import org.springframework.beans.factory.config.BeanPostProcessor;
 import org.springframework.core.Ordered;
 
-import javax.annotation.PostConstruct;
+import jakarta.annotation.PostConstruct;
 import java.lang.reflect.Field;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -32,16 +32,16 @@ public class TableInfoBuilder implements BeanPostProcessor, Ordered {
         Reflections reflections = null;
         String osName = System.getProperty("os.name");
         log.info("系统信息:{}",osName);
-        if (osName.contains("Mac")) {
-            // Mac系统
-            reflections = new Reflections(new ConfigurationBuilder()
-                    .setUrls(ClasspathHelper.forJavaClassPath())
-                    .setScanners(new SubTypesScanner(), new TypeAnnotationsScanner()));
-        } else {
-            // 其他
-//            reflections = new Reflections();
-            reflections = new Reflections("", new TypeAnnotationsScanner(), new SubTypesScanner());
-        }
+        ConfigurationBuilder configBuilder = new ConfigurationBuilder();
+
+        // 添加多个URL源来确保扫描到所有类
+        configBuilder.addUrls(ClasspathHelper.forClassLoader());
+        configBuilder.addUrls(ClasspathHelper.forJavaClassPath());
+        configBuilder.addUrls(ClasspathHelper.forPackage("com"));
+        configBuilder.addUrls(ClasspathHelper.forPackage(""));
+        configBuilder.setScanners(new SubTypesScanner(), new TypeAnnotationsScanner());
+
+        reflections = new Reflections(configBuilder);
         Set<Class<?>> classSet = reflections.getTypesAnnotatedWith(MyTable.class);
         log.info("共找到@MyTable注解的类{}个",classSet.size());
         Iterator<Class<?>> iterator = classSet.iterator();
@@ -93,22 +93,65 @@ public class TableInfoBuilder implements BeanPostProcessor, Ordered {
     
     /**
      * 智能推导Spring Boot应用的主包路径
-     * 通过堆栈跟踪找到main方法所在的类的包路径
+     * 优先读取@SpringBootApplication的scanBasePackages配置
+     * 如果没有配置则通过堆栈跟踪找到main方法所在的类的包路径
      */
     private String deduceMainApplicationPackage() {
+        try {
+            // 首先尝试从@SpringBootApplication注解中获取scanBasePackages
+            String mainClassName = findMainClass();
+            if (mainClassName != null) {
+                Class<?> mainClass = Class.forName(mainClassName);
+
+                // 检查@SpringBootApplication注解
+                org.springframework.boot.autoconfigure.SpringBootApplication springBootApp =
+                    mainClass.getAnnotation(org.springframework.boot.autoconfigure.SpringBootApplication.class);
+
+                if (springBootApp != null && springBootApp.scanBasePackages().length > 0) {
+                    // 如果配置了scanBasePackages，使用第一个作为主包
+                    String scanBasePackage = springBootApp.scanBasePackages()[0];
+                    log.info("从@SpringBootApplication.scanBasePackages获取包路径: {}", scanBasePackage);
+                    return scanBasePackage;
+                }
+
+                // 如果没有配置scanBasePackages，使用主类所在的包
+                int lastDotIndex = mainClassName.lastIndexOf('.');
+                if (lastDotIndex > 0) {
+                    String packageName = mainClassName.substring(0, lastDotIndex);
+                    log.info("从主类包路径获取: {}", packageName);
+                    return packageName;
+                }
+            }
+        } catch (Exception e) {
+            log.warn("无法从@SpringBootApplication获取包路径: {}", e.getMessage());
+        }
+
+        // 如果上述方法都失败，尝试其他方式
+        return deduceFromSystemProperties();
+    }
+
+    /**
+     * 查找Spring Boot主类
+     */
+    private String findMainClass() {
+        // 方法1：通过堆栈跟踪查找main方法
         StackTraceElement[] stackTrace = Thread.currentThread().getStackTrace();
         for (StackTraceElement element : stackTrace) {
             if ("main".equals(element.getMethodName())) {
-                String className = element.getClassName();
-                int lastDotIndex = className.lastIndexOf('.');
-                if (lastDotIndex > 0) {
-                    return className.substring(0, lastDotIndex);
-                }
+                return element.getClassName();
             }
         }
-        
-        // 如果堆栈跟踪方法失败，尝试其他方式
-        return deduceFromSystemProperties();
+
+        // 方法2：通过系统属性查找
+        String mainClass = System.getProperty("sun.java.command");
+        if (mainClass != null && mainClass.contains(".")) {
+            String[] parts = mainClass.split("\\s+");
+            if (parts.length > 0 && parts[0].contains(".")) {
+                return parts[0];
+            }
+        }
+
+        return null;
     }
     
     /**
