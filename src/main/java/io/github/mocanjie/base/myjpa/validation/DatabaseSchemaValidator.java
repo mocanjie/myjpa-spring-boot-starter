@@ -3,7 +3,6 @@ package io.github.mocanjie.base.myjpa.validation;
 import io.github.mocanjie.base.myjpa.cache.TableCacheManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.config.BeanPostProcessor;
 import org.springframework.core.Ordered;
 import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -18,15 +17,19 @@ import java.util.*;
 /**
  * 数据库模式验证器
  * 在启动时验证@MyTable配置的字段是否在数据库中真实存在
- * 实现BeanPostProcessor和Ordered接口，确保在TableInfoBuilder之后但优先级很高的时候执行验证
+ * 移除BeanPostProcessor接口，防止重复调用，验证统一由SchemaValidationRunner处理
  */
-public class DatabaseSchemaValidator implements BeanPostProcessor, Ordered {
-    
+public class DatabaseSchemaValidator implements Ordered {
+
     private static final Logger log = LoggerFactory.getLogger(DatabaseSchemaValidator.class);
-    
+
     private final JdbcTemplate jdbcTemplate;
     private final DataSource dataSource;
     private String databaseType;
+
+    // 添加验证执行标记，防止重复执行
+    private static volatile boolean validationExecuted = false;
+    private static final Object validationLock = new Object();
     
     public DatabaseSchemaValidator(JdbcTemplate jdbcTemplate, DataSource dataSource) {
         this.jdbcTemplate = jdbcTemplate;
@@ -37,69 +40,87 @@ public class DatabaseSchemaValidator implements BeanPostProcessor, Ordered {
     /**
      * 在Bean初始化完成后自动执行数据库模式验证
      * 通过Order机制确保在TableInfoBuilder之后执行，此时TableCacheManager已经初始化完成
+     * 添加同步控制，防止与SchemaValidationRunner重复执行
      */
     @PostConstruct
     private void init() {
-        log.info("开始执行数据库删除字段验证...");
-        try {
-            ValidationResult result = validateAllTables();
-            
-            if (result.hasErrors()) {
-                log.error("数据库删除字段验证发现错误，相关表的删除条件将被禁用");
-            } else {
-                log.info("数据库删除字段验证通过");
-            }
-        } catch (Exception e) {
-            log.error("数据库删除字段验证过程中发生异常: {}", e.getMessage(), e);
-        }
+        // 跳过PostConstruct执行，由SchemaValidationRunner统一执行
+        log.debug("DatabaseSchemaValidator.init() 被调用，跳过执行（由SchemaValidationRunner统一处理）");
     }
     
     /**
      * 验证所有@MyTable配置
-     * 
+     * 添加同步控制，防止重复执行
+     *
      * @return 验证结果
      */
     public ValidationResult validateAllTables() {
-        ValidationResult result = new ValidationResult();
-        
-        // 获取所有缓存的表信息
-        Set<String> allTableNames = getAllCachedTableNames();
-        
-        if (allTableNames.isEmpty()) {
-            log.warn("没有找到任何@MyTable注解配置的表");
+        // 检查是否已经执行过验证
+        if (validationExecuted) {
+            log.debug("数据库模式验证已执行过，跳过重复验证");
+            return new ValidationResult();
+        }
+
+        synchronized (validationLock) {
+            // 双重检查，防止并发情况下重复执行
+            if (validationExecuted) {
+                log.debug("数据库模式验证已执行过（双重检查），跳过重复验证");
+                return new ValidationResult();
+            }
+
+            ValidationResult result = new ValidationResult();
+
+            // 获取所有缓存的表信息
+            Set<String> allTableNames = getAllCachedTableNames();
+
+            if (allTableNames.isEmpty()) {
+                log.warn("没有找到任何@MyTable注解配置的表");
+                validationExecuted = true; // 标记已执行
+                return result;
+            }
+
+            log.info("开始验证{}个表的数据库模式...", allTableNames.size());
+
+            for (String tableName : allTableNames) {
+                validateTable(tableName, result);
+            }
+
+            logValidationSummary(result);
+
+            // 标记验证已完成
+            validationExecuted = true;
+            log.debug("数据库模式验证完成，已标记执行状态");
+
             return result;
         }
-        
-        log.info("开始验证{}个表的数据库模式...", allTableNames.size());
-        
-        for (String tableName : allTableNames) {
-            validateTable(tableName, result);
-        }
-        
-        logValidationSummary(result);
-        return result;
     }
     
     /**
      * 验证单个表
      */
     private void validateTable(String tableName, ValidationResult result) {
+        log.debug("开始验证表: {}", tableName);
+
         TableCacheManager.DeleteInfo deleteInfo = TableCacheManager.getDeleteInfoByTableName(tableName);
         if (deleteInfo == null) {
             result.addWarning(tableName, "未找到删除条件配置信息");
             return;
         }
-        
+
         try {
             // 检查表是否存在
             if (!tableExists(tableName)) {
                 result.addError(tableName, String.format("表 '%s' 在数据库中不存在", tableName));
                 return;
             }
-            
+
             // 获取表的所有列
             Set<String> columns = getTableColumns(tableName);
-            
+            if (columns.isEmpty()) {
+                result.addWarning(tableName, "无法获取表列信息，跳过字段验证");
+                return;
+            }
+
             // 验证主键字段 (忽略大小写)
             String pkColumn = getPkColumnFromCache(tableName);
             if (pkColumn != null && !containsIgnoreCase(columns, pkColumn)) {
@@ -108,16 +129,18 @@ public class DatabaseSchemaValidator implements BeanPostProcessor, Ordered {
 
             // 验证删除标记字段 (忽略大小写)
             String delColumn = deleteInfo.getDelColumn();
-            if (delColumn != null && !delColumn.isEmpty() && !containsIgnoreCase(columns, delColumn)) {
-                // 标记字段为无效，不报错
-                TableCacheManager.markDeleteFieldAsInvalid(tableName);
-                result.addWarning(tableName, String.format("删除标记字段 '%s' 在表 '%s' 中不存在，已跳过删除条件拼接", delColumn, tableName));
-            } else if (delColumn != null && !delColumn.isEmpty()) {
-                result.addSuccess(tableName, String.format("删除标记字段 '%s' 验证通过", delColumn));
+            if (delColumn != null && !delColumn.isEmpty()) {
+                if (!containsIgnoreCase(columns, delColumn)) {
+                    // 标记字段为无效，不报错
+                    TableCacheManager.markDeleteFieldAsInvalid(tableName);
+                    result.addWarning(tableName, String.format("删除标记字段 '%s' 在表 '%s' 中不存在，已跳过删除条件拼接", delColumn, tableName));
+                } else {
+                    result.addSuccess(tableName, String.format("删除标记字段 '%s' 验证通过", delColumn));
+                }
             }
-            
+
             log.debug("表 '{}' 验证完成，字段数: {}", tableName, columns.size());
-            
+
         } catch (Exception e) {
             result.addError(tableName, String.format("验证表 '%s' 时发生异常: %s", tableName, e.getMessage()));
             log.error("验证表 '{}' 时发生异常", tableName, e);
@@ -150,11 +173,38 @@ public class DatabaseSchemaValidator implements BeanPostProcessor, Ordered {
     
     /**
      * 获取表的所有列名
+     * 优先使用SQL查询，避免元数据API可能的性能问题
      */
     private Set<String> getTableColumns(String tableName) throws SQLException {
         Set<String> columns = new HashSet<>();
 
-        // 对于MySQL，表名区分大小写，先尝试原始表名，再尝试大写和小写
+        try {
+            // 优先使用SQL查询方式，性能更好且更可靠
+            columns = getTableColumnsUsingSql(tableName);
+
+            if (!columns.isEmpty()) {
+                log.debug("成功获取表 '{}' 的 {} 个字段", tableName, columns.size());
+                return columns;
+            }
+
+            // 如果SQL查询失败，尝试元数据查询作为备用方案
+            log.debug("SQL查询无结果，尝试元数据查询表 '{}'", tableName);
+            columns = getTableColumnsUsingMetadata(tableName);
+
+        } catch (Exception e) {
+            log.warn("获取表 '{}' 列信息时发生异常: {}", tableName, e.getMessage());
+        }
+
+        return columns;
+    }
+
+    /**
+     * 使用元数据查询获取表列信息（备用方案）
+     */
+    private Set<String> getTableColumnsUsingMetadata(String tableName) {
+        Set<String> columns = new HashSet<>();
+
+        // 对于MySQL，表名区分大小写，尝试不同的表名变体
         String[] tableNameVariants = {tableName, tableName.toUpperCase(), tableName.toLowerCase()};
 
         for (String tableNameVariant : tableNameVariants) {
@@ -166,18 +216,12 @@ public class DatabaseSchemaValidator implements BeanPostProcessor, Ordered {
                 }
 
                 if (!columns.isEmpty()) {
-                    log.debug("成功使用表名变体 '{}' 获取到 {} 个字段", tableNameVariant, columns.size());
+                    log.debug("元数据查询成功获取表 '{}' 的 {} 个字段", tableNameVariant, columns.size());
                     break;
                 }
             } catch (SQLException e) {
-                log.debug("使用表名变体 '{}' 查询失败: {}", tableNameVariant, e.getMessage());
+                log.debug("元数据查询表名变体 '{}' 失败: {}", tableNameVariant, e.getMessage());
             }
-        }
-
-        if (columns.isEmpty()) {
-            // 如果元数据查询失败，尝试使用SQL查询
-            log.warn("使用DatabaseMetaData查询表 '{}' 列信息失败，尝试SQL查询", tableName);
-            columns = getTableColumnsUsingSql(tableName);
         }
 
         return columns;
@@ -188,16 +232,25 @@ public class DatabaseSchemaValidator implements BeanPostProcessor, Ordered {
      */
     private Set<String> getTableColumnsUsingSql(String tableName) {
         Set<String> columns = new HashSet<>();
-        
+
         try {
             String sql = buildColumnQuerySql(tableName);
+            log.debug("执行SQL查询: {}", sql);
+
             jdbcTemplate.query(sql, rs -> {
-                columns.add(rs.getString(1));
+                String columnName = rs.getString(1);
+                if (columnName != null && !columnName.trim().isEmpty()) {
+                    columns.add(columnName);
+                }
             });
+
+            log.debug("通过SQL查询获取到 {} 个字段", columns.size());
         } catch (DataAccessException e) {
-            log.error("使用SQL查询表 '{}' 列信息也失败: {}", tableName, e.getMessage());
+            log.warn("使用SQL查询表 '{}' 列信息失败: {}", tableName, e.getMessage());
+        } catch (Exception e) {
+            log.warn("查询表 '{}' 列信息时发生未预期的异常: {}", tableName, e.getMessage());
         }
-        
+
         return columns;
     }
     
