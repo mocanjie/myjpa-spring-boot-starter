@@ -28,8 +28,7 @@ public class JSqlDynamicSqlParser {
     
     /**
      * 为SQL自动拼接逻辑删除条件
-     * 使用字符串替换方式避免JSqlParser 4.9的JOIN ON渲染问题
-     * 
+     *
      * @param sql 原始SQL语句
      * @return 拼接删除条件后的SQL语句
      */
@@ -37,25 +36,20 @@ public class JSqlDynamicSqlParser {
         if (sql == null || sql.trim().isEmpty()) {
             return sql;
         }
-        
+
         try {
             Statement statement = CCJSqlParserUtil.parse(sql);
-            
+
             if (!(statement instanceof Select)) {
                 // 非SELECT语句直接返回
                 return sql;
             }
-            
+
             Select selectStatement = (Select) statement;
             processSelectStatement(selectStatement);
-            
-            String result = selectStatement.toString();
-            
-            // 修复JSqlParser 4.9的重复ON子句问题
-            result = fixDuplicateOnClauses(result);
-            
-            return result;
-            
+
+            return selectStatement.toString();
+
         } catch (JSQLParserException e) {
             log.warn("解析SQL时发生异常，返回原始SQL: {}, 异常: {}", sql, e.getMessage());
             return sql;
@@ -63,27 +57,6 @@ public class JSqlDynamicSqlParser {
             log.error("处理SQL时发生未知异常，返回原始SQL: {}", sql, e);
             return sql;
         }
-    }
-    
-    /**
-     * 修复JSqlParser 4.9生成的重复ON子句问题
-     * 将形如 "ON condition1 AND condition2 ON originalCondition" 修复为 "ON condition1 AND condition2"
-     */
-    private static String fixDuplicateOnClauses(String sql) {
-        if (sql == null || !sql.contains(" ON ")) {
-            return sql;
-        }
-        
-        // 使用正则表达式匹配并修复重复的ON子句
-        // 匹配模式：ON (conditions) ON (original_condition) 后跟WHERE/ORDER/GROUP/LIMIT等关键字或结尾
-        String pattern = "\\bON\\s+(.*?)\\s+ON\\s+.*?(?=\\s+(?:WHERE|ORDER|GROUP|LIMIT|$))";
-        String result = sql.replaceAll(pattern, "ON $1");
-        
-        if (!result.equals(sql)) {
-            log.debug("修复了重复ON子句: \n原SQL: {}\n修复后: {}", sql, result);
-        }
-        
-        return result;
     }
     
     /**
@@ -265,37 +238,57 @@ public class JSqlDynamicSqlParser {
     
     /**
      * 将删除条件添加到JOIN ON子句中
-     * 注意：JSqlParser 4.9存在重复ON子句的渲染bug，但会在最后通过regex修复
+     * 使用 setOnExpressions 避免 JSqlParser 废弃的 setOnExpression 方法导致的重复 ON 子句问题
      */
     private static void addDeleteConditionToJoinOn(TableDeleteCondition condition) {
         if (condition.joinObject == null) {
             log.warn("JOIN对象为空，无法添加删除条件到ON子句");
             return;
         }
-        
+
         Expression deleteCondition = createDeleteConditionExpression(condition.deleteInfo, condition.alias);
-        Expression existingOn = condition.joinObject.getOnExpression();
-        
-        log.debug("原有ON条件: {}", existingOn);
+
         log.debug("要添加的删除条件: {}", deleteCondition);
-        
-        if (existingOn != null) {
-            // 检查删除条件是否已经存在于现有ON条件中
+
+        // 获取现有的ON条件
+        Collection<Expression> onExpressions = condition.joinObject.getOnExpressions();
+
+        if (onExpressions != null && !onExpressions.isEmpty()) {
+            // 检查删除条件是否已经存在
             String deleteColumnRef = (condition.alias != null ? condition.alias : condition.tableName) + "." + condition.deleteInfo.getDelColumn();
-            if (existingOn.toString().contains(deleteColumnRef)) {
-                log.debug("表{}的删除条件已存在于ON子句中，跳过添加", condition.tableName);
-                return;
+            for (Expression expr : onExpressions) {
+                if (expr.toString().contains(deleteColumnRef)) {
+                    log.debug("表{}的删除条件已存在于ON子句中，跳过添加", condition.tableName);
+                    return;
+                }
             }
-            
-            // 直接创建AndExpression，依赖后续的regex修复来处理JSqlParser 4.9的重复ON子句问题
-            AndExpression newOnExpression = new AndExpression(existingOn, deleteCondition);
-            condition.joinObject.setOnExpression(newOnExpression);
-            
-            log.debug("组合后的ON条件: {}", newOnExpression);
+
+            // 组合所有现有条件
+            Expression combined = null;
+            for (Expression expr : onExpressions) {
+                if (combined == null) {
+                    combined = expr;
+                } else {
+                    combined = new AndExpression(combined, expr);
+                }
+            }
+
+            // 添加删除条件
+            combined = new AndExpression(combined, deleteCondition);
+
+            // 使用正确的 setOnExpressions 方法
+            List<Expression> newExpressions = new ArrayList<>();
+            newExpressions.add(combined);
+            condition.joinObject.setOnExpressions(newExpressions);
+
+            log.debug("组合后的ON条件: {}", combined);
         } else {
-            condition.joinObject.setOnExpression(deleteCondition);
+            // 没有现有条件，直接设置删除条件
+            List<Expression> newExpressions = new ArrayList<>();
+            newExpressions.add(deleteCondition);
+            condition.joinObject.setOnExpressions(newExpressions);
         }
-        
+
         log.debug("已将表{}的删除条件添加到JOIN ON子句", condition.tableName);
     }
     
