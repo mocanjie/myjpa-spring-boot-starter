@@ -1,6 +1,7 @@
 package io.github.mocanjie.base.myjpa.parser;
 
 import io.github.mocanjie.base.myjpa.annotation.MyField;
+import io.github.mocanjie.base.myjpa.cache.TableCacheManager;
 import io.github.mocanjie.base.myjpa.metadata.TableInfo;
 import io.github.mocanjie.base.myjpa.utils.CommonUtils;
 import org.apache.commons.lang3.StringUtils;
@@ -110,16 +111,49 @@ public class SqlParser {
         return String.format(SELECT_BY_SQL,tableInfo.getTableName(),columnName,fieldName);
     }
 
+    /**
+     * 智能生成单条删除SQL（自动判断物理删除还是逻辑删除）
+     * @param tableInfo 表信息
+     * @return DELETE 或 UPDATE 语句
+     */
     public static String getDelByIdSql(TableInfo tableInfo){
-        return String.format(DEL_BYID_SQL,tableInfo.getTableName(),tableInfo.getPkColumnName());
+        // 检查是否配置了逻辑删除且字段在数据库中有效
+        TableCacheManager.DeleteInfo deleteInfo = TableCacheManager.getDeleteInfoByClassName(tableInfo.getClazz().getName());
+        if (deleteInfo != null && deleteInfo.isValid() &&
+            StringUtils.isNotBlank(deleteInfo.getDelColumn())) {
+            // 逻辑删除：UPDATE table SET delete_flag = 1 WHERE id = ?
+            return String.format("UPDATE %s SET %s = %s WHERE %s = ?",
+                    tableInfo.getTableName(),
+                    deleteInfo.getDelColumn(),
+                    deleteInfo.getDelValue(),
+                    tableInfo.getPkColumnName());
+        } else {
+            // 物理删除：DELETE FROM table WHERE id = ?
+            return String.format(DEL_BYID_SQL, tableInfo.getTableName(), tableInfo.getPkColumnName());
+        }
     }
 
+    /**
+     * 智能生成批量删除SQL（自动判断物理删除还是逻辑删除）
+     * @param tableInfo 表信息
+     * @return DELETE 或 UPDATE 语句
+     */
     public static String getDelByIdsSql(TableInfo tableInfo){
-        return String.format(DEL_BYIDS_SQL,tableInfo.getTableName(),tableInfo.getPkColumnName(),tableInfo.getPkFieldName());
-    }
-
-    public static String getDelByIds4logicSql(TableInfo tableInfo){
-        return String.format(DEL_BYIDS_LOGIC_SQL,tableInfo.getTableName(),tableInfo.getDelColumnName(),tableInfo.getDelValue(),tableInfo.getPkColumnName(),tableInfo.getPkFieldName());
+        // 检查是否配置了逻辑删除且字段在数据库中有效
+        TableCacheManager.DeleteInfo deleteInfo = TableCacheManager.getDeleteInfoByClassName(tableInfo.getClazz().getName());
+        if (deleteInfo != null && deleteInfo.isValid() &&
+            StringUtils.isNotBlank(deleteInfo.getDelColumn())) {
+            // 逻辑删除：UPDATE table SET delete_flag = 1 WHERE id IN (:ids)
+            return String.format(DEL_BYIDS_LOGIC_SQL,
+                    tableInfo.getTableName(),
+                    deleteInfo.getDelColumn(),
+                    deleteInfo.getDelValue(),
+                    tableInfo.getPkColumnName(),
+                    tableInfo.getPkFieldName());
+        } else {
+            // 物理删除：DELETE FROM table WHERE id IN (:ids)
+            return String.format(DEL_BYIDS_SQL, tableInfo.getTableName(), tableInfo.getPkColumnName(), tableInfo.getPkFieldName());
+        }
     }
 
 }

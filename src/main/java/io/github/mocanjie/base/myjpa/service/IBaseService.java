@@ -50,6 +50,4 @@ public interface IBaseService {
 
 	<PO> int delByIds(Class<PO> clazz, Object... id);
 
-	<PO> int delById4logic(Class<PO> clazz, Object... id);
-
 }

@@ -100,12 +100,6 @@ public class BaseServiceImpl implements IBaseService {
 
 	@Override
 	@Transactional
-	public <PO> int delById4logic(Class<PO> clazz, Object... id) {
-		return baseDao.delById4logic(clazz, id);
-	}
-
-	@Override
-	@Transactional
 	public <PO> Serializable insertPO(PO po) {
 		return baseDao.insertPO(po, true);
 	}

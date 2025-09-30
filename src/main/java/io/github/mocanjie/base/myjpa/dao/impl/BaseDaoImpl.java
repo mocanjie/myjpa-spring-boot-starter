@@ -197,6 +197,7 @@ public class BaseDaoImpl implements IBaseDao {
 	public <PO> int delPO(PO po) {
 		try{
 			TableInfo tableInfo = TableInfoBuilder.getTableInfo(po.getClass());
+			// 智能生成删除SQL（自动判断物理删除还是逻辑删除）
 			String sql = SqlParser.getDelByIdSql(tableInfo);
 			return this.getJdbcTemplate().update(sql,tableInfo.getPkValue(po));
 		}catch(Exception e){
@@ -214,30 +215,12 @@ public class BaseDaoImpl implements IBaseDao {
 				map.put(tableInfo.getPkFieldName(),o);
 				beanList.add(map);
 			}
+			// 智能生成删除SQL（自动判断物理删除还是逻辑删除）
 			String sql = SqlParser.getDelByIdsSql(tableInfo);
 			SqlParameterSource[] params = SqlParameterSourceUtils.createBatch(beanList);
 			return namedParameterJdbcTemplate.batchUpdate(sql, params).length;
 		}catch(Exception e){
 			throw new BusinessException("del error!");
-		}
-	}
-
-	@Override
-	public <PO> int delById4logic(Class<PO> clazz, Object... id) {
-		try{
-			TableInfo tableInfo = TableInfoBuilder.getTableInfo(clazz);
-			String sql = SqlParser.getDelByIds4logicSql(tableInfo);
-			List<Map<String,Object>> beanList = new ArrayList<>();
-			for (Object o : id) {
-				Map<String,Object> map = new HashMap<>();
-				map.put(tableInfo.getPkFieldName(),o);
-				beanList.add(map);
-			}
-			SqlParameterSource[] params = SqlParameterSourceUtils.createBatch(beanList);
-			return namedParameterJdbcTemplate.batchUpdate(sql, params).length;
-		}catch(Exception e){
-			e.printStackTrace();
-			throw new BusinessException("del4logic error!");
 		}
 	}
 

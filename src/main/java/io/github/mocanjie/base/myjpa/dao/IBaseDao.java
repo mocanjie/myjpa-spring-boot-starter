@@ -41,8 +41,6 @@ public interface IBaseDao {
 	<PO> int delPO(PO po);
 
 	<PO> int delByIds(Class<PO> clazz, Object... id);
-	
-	<PO> int delById4logic(Class<PO> clazz, Object... id);
 
 	// ======================= 新增支持动态拼接删除条件的查询方法 =======================
 	
