@@ -1,9 +1,11 @@
 package io.github.mocanjie.base.myjpa.cache;
 
 import io.github.mocanjie.base.myjpa.annotation.MyTable;
-import org.reflections.Reflections;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.config.BeanDefinition;
+import org.springframework.context.annotation.ClassPathScanningCandidateComponentProvider;
+import org.springframework.core.type.filter.AnnotationTypeFilter;
 
 import java.util.HashSet;
 import java.util.Map;
@@ -127,40 +129,50 @@ public class TableCacheManager {
     
     /**
      * 扫描指定包路径下的@MyTable注解
+     * 使用Spring的ClassPathScanningCandidateComponentProvider替代Reflections
      */
     private static void scanPackage(String basePackage) {
-        Reflections reflections = new Reflections(basePackage);
-        Set<Class<?>> annotatedClasses = reflections.getTypesAnnotatedWith(MyTable.class);
-        
-        for (Class<?> clazz : annotatedClasses) {
-            try {
-                MyTable myTable = clazz.getAnnotation(MyTable.class);
-                if (myTable != null) {
-                    String tableName = myTable.value();
-                    String className = clazz.getName();
-                    
-                    DeleteInfo deleteInfo = new DeleteInfo(
-                        myTable.delColumn(),
-                        myTable.delField(),
-                        myTable.delValue()
-                    );
-                    
-                    PkInfo pkInfo = new PkInfo(
-                        myTable.pkColumn(),
-                        myTable.pkField()
-                    );
-                    
-                    TABLE_DELETE_INFO_CACHE.put(tableName.toLowerCase(), deleteInfo);
-                    CLASS_DELETE_INFO_CACHE.put(className, deleteInfo);
-                    CLASS_TABLE_NAME_CACHE.put(className, tableName);
-                    TABLE_PK_INFO_CACHE.put(tableName.toLowerCase(), pkInfo);
-                    
-                    log.info("缓存表删除信息: table={}, class={}, delColumn={}, delValue={}",
-                             tableName, className, myTable.delColumn(), myTable.delValue());
+        // 使用Spring的类路径扫描器
+        ClassPathScanningCandidateComponentProvider scanner =
+            new ClassPathScanningCandidateComponentProvider(false);
+        scanner.addIncludeFilter(new AnnotationTypeFilter(MyTable.class));
+
+        try {
+            Set<BeanDefinition> candidates = scanner.findCandidateComponents(basePackage);
+
+            for (BeanDefinition bd : candidates) {
+                try {
+                    Class<?> clazz = Class.forName(bd.getBeanClassName());
+                    MyTable myTable = clazz.getAnnotation(MyTable.class);
+                    if (myTable != null) {
+                        String tableName = myTable.value();
+                        String className = clazz.getName();
+
+                        DeleteInfo deleteInfo = new DeleteInfo(
+                            myTable.delColumn(),
+                            myTable.delField(),
+                            myTable.delValue()
+                        );
+
+                        PkInfo pkInfo = new PkInfo(
+                            myTable.pkColumn(),
+                            myTable.pkField()
+                        );
+
+                        TABLE_DELETE_INFO_CACHE.put(tableName.toLowerCase(), deleteInfo);
+                        CLASS_DELETE_INFO_CACHE.put(className, deleteInfo);
+                        CLASS_TABLE_NAME_CACHE.put(className, tableName);
+                        TABLE_PK_INFO_CACHE.put(tableName.toLowerCase(), pkInfo);
+
+                        log.info("缓存表删除信息: table={}, class={}, delColumn={}, delValue={}",
+                                 tableName, className, myTable.delColumn(), myTable.delValue());
+                    }
+                } catch (Exception e) {
+                    log.warn("处理类{}的@MyTable注解时发生异常: {}", bd.getBeanClassName(), e.getMessage());
                 }
-            } catch (Exception e) {
-                log.warn("处理类{}的@MyTable注解时发生异常: {}", clazz.getName(), e.getMessage());
             }
+        } catch (Exception e) {
+            log.warn("扫描包 {} 时发生异常: {}", basePackage, e.getMessage());
         }
     }
     

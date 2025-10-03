@@ -46,7 +46,6 @@
         <maven-gpg-plugin.version>3.0.1</maven-gpg-plugin.version>
         <nexus-staging-maven-plugin.version>1.6.8</nexus-staging-maven-plugin.version>
 
-        <reflections.version>0.10.2</reflections.version>
         <spring-boot-starter-jdbc.version>3.2.0</spring-boot-starter-jdbc.version>
         <mycommon.version>spring3</mycommon.version>
         <jsqlparser.version>5.3</jsqlparser.version>
@@ -84,12 +83,6 @@
                     <artifactId>spring-boot-starter-logging</artifactId>
                 </exclusion>
             </exclusions>
-        </dependency>
-
-        <dependency>
-            <groupId>org.reflections</groupId>
-            <artifactId>reflections</artifactId>
-            <version>${reflections.version}</version>
         </dependency>
 
         <dependency>
