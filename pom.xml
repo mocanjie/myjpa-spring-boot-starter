@@ -4,7 +4,7 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>io.github.mocanjie</groupId>
     <artifactId>myjpa-spring-boot-starter</artifactId>
-    <version>spring3.jsql</version>
+    <version>spring3</version>
     <packaging>jar</packaging>
     <name>${project.artifactId}-${project.version}</name>
     <description>${project.artifactId}-${project.version}</description>
@@ -97,9 +97,6 @@
             <version>${mycommon.version}</version>
         </dependency>
 
-
-
-
         <!-- Jakarta Annotation API for Spring Boot 3.x compatibility -->
         <dependency>
             <groupId>jakarta.annotation</groupId>
@@ -128,23 +125,6 @@
             <artifactId>commons-beanutils</artifactId>
             <version>${commons-beanutils.version}</version>
         </dependency>
-
-        <!-- JUnit 5 for testing -->
-        <dependency>
-            <groupId>org.junit.jupiter</groupId>
-            <artifactId>junit-jupiter</artifactId>
-            <version>5.9.3</version>
-            <scope>test</scope>
-        </dependency>
-
-        <!-- MySQL JDBC Driver for testing -->
-        <dependency>
-            <groupId>com.mysql</groupId>
-            <artifactId>mysql-connector-j</artifactId>
-            <version>8.0.33</version>
-            <scope>test</scope>
-        </dependency>
-
     </dependencies>
 
 
