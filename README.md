@@ -113,22 +113,72 @@ public class UserService extends BaseServiceImpl<User> {
 
     // 继承了基础 CRUD 方法
     public void example() {
-        // 保存
+        // 1. 保存单个实体
         User user = new User();
         user.setUsername("test");
-        save(user);
+        insertPO(user);  // 自动生成ID
+        // 或者手动控制ID生成：insertPO(user, false)
 
-        // 查询
-        User found = getById(1L);
+        // 2. 批量保存
+        List<User> users = Arrays.asList(user1, user2, user3);
+        batchInsertPO(users);  // 自动生成ID
+        // 或者：batchInsertPO(users, true, 100)  // 指定批次大小
 
-        // 自定义 SQL 查询（自动添加逻辑删除条件）
-        List<User> users = queryListForSqlWithDeleteCondition(
-            "SELECT * FROM sys_user WHERE age > ?",
-            18
+        // 3. 更新实体
+        user.setUsername("updated");
+        updatePO(user);  // 更新所有字段
+        // 或者：updatePO(user, true)  // 忽略null值
+        // 或者：updatePO(user, "username", "email")  // 强制更新指定字段
+
+        // 4. 根据ID查询
+        User found = queryById(1L, User.class);
+        // 或者：queryById("user123", User.class)
+
+        // 5. 根据字段查询单条记录
+        User userByName = querySingleByField("username", "test", User.class);
+
+        // 6. 自定义SQL查询（使用Map参数 + 命名参数）
+        Map<String, Object> params = new HashMap<>();
+        params.put("age", 18);
+        params.put("status", 1);
+        List<User> activeUsers = queryListForSql(
+            "SELECT * FROM sys_user WHERE age > :age AND status = :status",
+            params,
+            User.class
         );
 
-        // 逻辑删除
-        deleteById(1L);
+        // 7. 自定义SQL查询（使用对象参数）
+        UserQueryParam queryParam = new UserQueryParam();
+        queryParam.setAge(18);
+        List<User> users2 = queryListForSql(
+            "SELECT * FROM sys_user WHERE age > :age",
+            queryParam,
+            User.class
+        );
+
+        // 8. 查询单条记录
+        User single = querySingleForSql(
+            "SELECT * FROM sys_user WHERE username = :username",
+            params,
+            User.class
+        );
+
+        // 9. 分页查询
+        Pager<User> pager = new Pager<>(1, 10);  // 第1页，每页10条
+        Pager<User> result = queryPageForSql(
+            "SELECT * FROM sys_user WHERE age > :age",
+            params,
+            pager,
+            User.class
+        );
+        List<User> pageData = result.getRows();
+        long total = result.getTotalRows();
+
+        // 10. 删除实体
+        delPO(user);  // 逻辑删除或物理删除（取决于@MyTable配置）
+
+        // 11. 批量删除
+        delByIds(User.class, 1L, 2L, 3L);  // 可变参数
     }
 }
 ```
@@ -137,22 +187,155 @@ public class UserService extends BaseServiceImpl<User> {
 
 ### IBaseService 接口
 
-#### 基础 CRUD
-- `save(T entity)` - 保存实体
-- `update(T entity)` - 更新实体
-- `deleteById(ID id)` - 删除（支持逻辑删除）
-- `getById(ID id)` - 根据 ID 查询
-- `listAll()` - 查询所有
+所有 Service 继承 `BaseServiceImpl` 后自动拥有以下方法：
 
-#### 批量操作
-- `batchSave(List<T> entities)` - 批量保存
-- `batchUpdate(List<T> entities)` - 批量更新
-- `batchDeleteByIds(List<ID> ids)` - 批量删除
+#### 插入操作
+```java
+<PO> Serializable insertPO(PO po);  // 插入单条，自动生成ID
+<PO> Serializable insertPO(PO po, boolean autoCreateId);  // 控制是否自动生成ID
+<PO> Serializable batchInsertPO(List<PO> pos);  // 批量插入，自动生成ID
+<PO> Serializable batchInsertPO(List<PO> pos, boolean autoCreateId);  // 批量插入，控制ID生成
+<PO> Serializable batchInsertPO(List<PO> pos, int batchSize);  // 批量插入，指定批次大小
+<PO> Serializable batchInsertPO(List<PO> pos, boolean autoCreateId, int batchSize);  // 完整控制
+```
 
-#### 自定义查询
-- `queryListForSql(String sql, Object... params)` - 原始 SQL 查询
-- `queryListForSqlWithDeleteCondition(String sql, Object... params)` - 自动添加逻辑删除条件
-- `queryPageForSqlWithDeleteCondition(String sql, int pageNum, int pageSize, Object... params)` - 分页查询
+#### 更新操作
+```java
+<PO> int updatePO(PO po);  // 更新所有字段
+<PO> int updatePO(PO po, boolean ignoreNull);  // ignoreNull=true时不更新null字段
+<PO> int updatePO(PO po, String... forceUpdateProperties);  // 强制更新指定字段（即使为null）
+```
+
+#### 查询操作
+```java
+// 根据ID查询
+<PO> PO queryById(String id, Class<PO> clazz);
+<PO> PO queryById(Long id, Class<PO> clazz);
+
+// 根据字段查询单条记录
+<T> T querySingleByField(String fieldName, String fieldValue, Class<T> clazz);
+
+// 自定义SQL查询（Object参数方式）
+<T> List<T> queryListForSql(String sql, Object param, Class<T> clazz);
+<T> T querySingleForSql(String sql, Object param, Class<T> clazz);
+<T> Pager<T> queryPageForSql(String sql, Object param, Pager<T> pager, Class<T> clazz);
+
+// 自定义SQL查询（Map参数方式）
+<T> List<T> queryListForSql(String sql, Map<String, Object> param, Class<T> clazz);
+<T> T querySingleForSql(String sql, Map<String, Object> param, Class<T> clazz);
+<T> Pager<T> queryPageForSql(String sql, Map<String, Object> param, Pager<T> pager, Class<T> clazz);
+```
+
+#### 删除操作
+```java
+<PO> int delPO(PO po);  // 删除单个实体（物理删除或逻辑删除取决于@MyTable配置）
+<PO> int delByIds(Class<PO> clazz, Object... id);  // 批量删除（支持可变参数）
+```
+
+### IBaseDao 接口（高级功能）
+
+除了上述基础方法外，`IBaseDao` 还提供**自动添加逻辑删除条件**的查询方法：
+
+#### 智能删除条件查询
+```java
+// 查询列表（自动添加逻辑删除条件）
+<T> List<T> queryListForSqlWithDeleteCondition(String sql, Object param, Class<T> clazz);
+<T> List<T> queryListForSqlWithDeleteCondition(String sql, Map<String, Object> param, Class<T> clazz);
+
+// 查询单条（自动添加逻辑删除条件）
+<T> T querySingleForSqlWithDeleteCondition(String sql, Object param, Class<T> clazz);
+<T> T querySingleForSqlWithDeleteCondition(String sql, Map<String, Object> param, Class<T> clazz);
+
+// 分页查询（自动添加逻辑删除条件）
+<T> Pager<T> queryPageForSqlWithDeleteCondition(String sql, Object param, Pager<T> pager, Class<T> clazz);
+<T> Pager<T> queryPageForSqlWithDeleteCondition(String sql, Map<String, Object> param, Pager<T> pager, Class<T> clazz);
+
+// 根据ID查询（自动添加逻辑删除条件）
+<PO> PO queryByIdWithDeleteCondition(Object id, Class<PO> clazz);
+
+// 根据字段查询（自动添加逻辑删除条件）
+<PO> PO querySingleByFieldWithDeleteCondition(String fieldName, String fieldValue, Class<PO> clazz);
+```
+
+**使用示例：**
+
+```java
+@Service
+public class UserService extends BaseServiceImpl<User> {
+
+    @Autowired
+    private IBaseDao baseDao;  // 注入IBaseDao使用高级功能
+
+    public void advancedQuery() {
+        // 自动为SQL中的所有表添加逻辑删除条件
+        Map<String, Object> params = new HashMap<>();
+        params.put("age", 18);
+
+        // 原始SQL：SELECT * FROM sys_user WHERE age > :age
+        // 自动转换为：SELECT * FROM sys_user WHERE age > :age AND sys_user.delete_flag = 0
+        List<User> users = baseDao.queryListForSqlWithDeleteCondition(
+            "SELECT * FROM sys_user WHERE age > :age",
+            params,
+            User.class
+        );
+
+        // JOIN查询也会自动处理
+        // 原始SQL：SELECT u.*, r.role_name FROM sys_user u LEFT JOIN role r ON u.role_id = r.id
+        // 自动转换：添加各表的删除条件到相应位置（WHERE或ON子句）
+        List<UserVO> userWithRoles = baseDao.queryListForSqlWithDeleteCondition(
+            "SELECT u.*, r.role_name FROM sys_user u LEFT JOIN role r ON u.role_id = r.id WHERE u.age > :age",
+            params,
+            UserVO.class
+        );
+    }
+}
+```
+
+### 参数绑定说明
+
+**重要：** 本框架使用 **命名参数** 而非 JDBC 的 `?` 占位符。
+
+#### ✅ 正确写法（命名参数）
+```java
+Map<String, Object> params = new HashMap<>();
+params.put("username", "test");
+params.put("age", 18);
+
+queryListForSql(
+    "SELECT * FROM sys_user WHERE username = :username AND age > :age",
+    params,
+    User.class
+);
+```
+
+#### ❌ 错误写法（不支持）
+```java
+// ❌ 不支持 ? 占位符 + 可变参数
+queryListForSql(
+    "SELECT * FROM sys_user WHERE username = ? AND age > ?",
+    "test", 18  // 这种方式不支持！
+);
+```
+
+#### 使用对象作为参数
+```java
+public class UserQueryParam {
+    private String username;
+    private Integer age;
+    // getters and setters
+}
+
+UserQueryParam param = new UserQueryParam();
+param.setUsername("test");
+param.setAge(18);
+
+// 对象的属性名对应SQL中的命名参数
+queryListForSql(
+    "SELECT * FROM sys_user WHERE username = :username AND age > :age",
+    param,  // 框架会自动从对象中提取属性值
+    User.class
+);
+```
 
 ## 🏗️ 架构设计
 
