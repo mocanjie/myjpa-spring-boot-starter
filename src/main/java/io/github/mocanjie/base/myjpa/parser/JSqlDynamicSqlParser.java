@@ -1,9 +1,11 @@
 package io.github.mocanjie.base.myjpa.parser;
 
 import io.github.mocanjie.base.myjpa.cache.TableCacheManager;
+import io.github.mocanjie.base.myjpa.tenant.TenantContext;
 import net.sf.jsqlparser.JSQLParserException;
 import net.sf.jsqlparser.expression.BinaryExpression;
 import net.sf.jsqlparser.expression.Expression;
+import net.sf.jsqlparser.expression.JdbcNamedParameter;
 import net.sf.jsqlparser.expression.LongValue;
 import net.sf.jsqlparser.expression.operators.conditional.AndExpression;
 import net.sf.jsqlparser.expression.operators.conditional.OrExpression;
@@ -70,6 +72,243 @@ public class JSqlDynamicSqlParser {
         }
     }
     
+    // ===================== 多租户条件注入 =====================
+
+    /**
+     * 为 SQL 自动拼接租户隔离条件（参数化，生成 :myjpaTenantId 占位符）
+     *
+     * <p>以下情况不注入：
+     * <ul>
+     *   <li>全局开关 {@code myjpa.tenant.enabled=false}</li>
+     *   <li>当前线程调用了 {@link TenantContext#skip()}</li>
+     *   <li>SQL 中的表在数据库中不存在租户字段（由启动时扫描确定）</li>
+     * </ul>
+     *
+     * @param sql 原始 SQL（通常已经过 appendDeleteCondition 处理）
+     * @return 拼接租户条件后的 SQL，不需要拼接则返回原 SQL
+     */
+    public static String appendTenantCondition(String sql) {
+        if (!tenantEnabled || sql == null || sql.trim().isEmpty()) {
+            return sql;
+        }
+        if (TenantContext.isSkipped()) {
+            log.debug("当前线程已标记跳过租户隔离，不注入租户条件");
+            return sql;
+        }
+
+        try {
+            Statement statement = CCJSqlParserUtil.parse(sql);
+            if (!(statement instanceof Select)) {
+                return sql;
+            }
+            Select selectStatement = (Select) statement;
+            processTenantSelect(selectStatement);
+            return selectStatement.toString();
+        } catch (JSQLParserException e) {
+            log.warn("解析SQL时发生异常（租户条件），返回原始SQL: {}, 异常: {}", sql, e.getMessage());
+            return sql;
+        } catch (Exception e) {
+            log.error("处理SQL时发生未知异常（租户条件），返回原始SQL: {}", sql, e);
+            return sql;
+        }
+    }
+
+    /**
+     * 处理 SELECT 语句，注入租户条件（复用 processSelect 框架，但走租户分支）
+     */
+    private static void processTenantSelect(Select select) {
+        if (select instanceof PlainSelect) {
+            processTenantPlainSelect((PlainSelect) select);
+        } else if (select instanceof SetOperationList) {
+            for (Select s : ((SetOperationList) select).getSelects()) {
+                processTenantSelect(s);
+            }
+        }
+    }
+
+    /**
+     * 处理简单 SELECT 语句的租户条件注入，逻辑与 processPlainSelect 对称
+     */
+    private static void processTenantPlainSelect(PlainSelect plainSelect) {
+        List<TableTenantCondition> whereConditions = new ArrayList<>();
+        List<TableTenantCondition> joinConditions = new ArrayList<>();
+
+        Expression existingWhere = plainSelect.getWhere();
+
+        // 主表
+        if (plainSelect.getFromItem() instanceof Table) {
+            Table table = (Table) plainSelect.getFromItem();
+            addTableTenantConditionByType(table, existingWhere, JoinType.FROM_TABLE, null, whereConditions, joinConditions);
+        } else if (plainSelect.getFromItem() instanceof ParenthesedSelect) {
+            processTenantSelect(((ParenthesedSelect) plainSelect.getFromItem()).getSelect());
+        }
+
+        // JOIN 表
+        if (plainSelect.getJoins() != null) {
+            for (Join join : plainSelect.getJoins()) {
+                if (join.getRightItem() instanceof Table) {
+                    addTableTenantConditionByType((Table) join.getRightItem(), existingWhere,
+                            getJoinType(join), join, whereConditions, joinConditions);
+                } else if (join.getRightItem() instanceof ParenthesedSelect) {
+                    processTenantSelect(((ParenthesedSelect) join.getRightItem()).getSelect());
+                }
+            }
+        }
+
+        // 注入 WHERE 条件
+        if (!whereConditions.isEmpty()) {
+            Expression tenantConditions = buildTenantConditionsExpression(whereConditions);
+            Expression currentWhere = plainSelect.getWhere();
+            plainSelect.setWhere(currentWhere != null
+                    ? new AndExpression(currentWhere, tenantConditions)
+                    : tenantConditions);
+        }
+
+        // 注入 JOIN ON 条件
+        for (TableTenantCondition condition : joinConditions) {
+            addTenantConditionToJoinOn(condition);
+        }
+
+        // 递归处理子查询
+        processTenantSubQueries(plainSelect);
+    }
+
+    private static void addTableTenantConditionByType(Table table, Expression existingWhere, JoinType joinType,
+                                                       Join joinObject,
+                                                       List<TableTenantCondition> whereConditions,
+                                                       List<TableTenantCondition> joinConditions) {
+        String tableName = table.getName();
+        String alias = table.getAlias() != null ? table.getAlias().getName() : null;
+
+        if (!TableCacheManager.hasTenantColumn(tableName)) {
+            return;
+        }
+
+        // 幂等检查：如果 WHERE 中已经有 tenant 条件，跳过
+        if (isTenantConditionExists(existingWhere, tenantColumn, alias, tableName)) {
+            log.debug("表 {} 的租户条件已存在，跳过自动拼接", tableName);
+            return;
+        }
+
+        TableTenantCondition condition = new TableTenantCondition(tableName, alias, joinType, joinObject);
+        if (joinType == JoinType.LEFT_JOIN || joinType == JoinType.RIGHT_JOIN) {
+            joinConditions.add(condition);
+        } else {
+            whereConditions.add(condition);
+        }
+        log.debug("表 {}({}) 的租户条件将添加到 {}", tableName, joinType,
+                (joinType == JoinType.LEFT_JOIN || joinType == JoinType.RIGHT_JOIN) ? "JOIN ON" : "WHERE");
+    }
+
+    private static Expression buildTenantConditionsExpression(List<TableTenantCondition> conditions) {
+        Expression result = null;
+        for (TableTenantCondition tc : conditions) {
+            Expression cond = createTenantConditionExpression(tc.alias != null ? tc.alias : tc.tableName);
+            result = (result == null) ? cond : new AndExpression(result, cond);
+        }
+        return result;
+    }
+
+    private static void addTenantConditionToJoinOn(TableTenantCondition condition) {
+        if (condition.joinObject == null) return;
+
+        Expression tenantCond = createTenantConditionExpression(
+                condition.alias != null ? condition.alias : condition.tableName);
+
+        Collection<Expression> onExpressions = condition.joinObject.getOnExpressions();
+        if (onExpressions != null && !onExpressions.isEmpty()) {
+            String tenantColumnRef = (condition.alias != null ? condition.alias : condition.tableName)
+                    + "." + tenantColumn;
+            for (Expression expr : onExpressions) {
+                if (expr.toString().contains(tenantColumnRef)) {
+                    return; // 已存在，跳过
+                }
+            }
+            Expression combined = null;
+            for (Expression expr : onExpressions) {
+                combined = (combined == null) ? expr : new AndExpression(combined, expr);
+            }
+            List<Expression> newExpressions = new ArrayList<>();
+            newExpressions.add(new AndExpression(combined, tenantCond));
+            condition.joinObject.setOnExpressions(newExpressions);
+        } else {
+            List<Expression> newExpressions = new ArrayList<>();
+            newExpressions.add(tenantCond);
+            condition.joinObject.setOnExpressions(newExpressions);
+        }
+    }
+
+    /**
+     * 创建租户条件表达式：tableRef.tenant_id = :myjpaTenantId
+     */
+    private static Expression createTenantConditionExpression(String tableRef) {
+        Column column = new Column();
+        if (tableRef != null && !tableRef.trim().isEmpty()) {
+            column.setTable(new Table(tableRef));
+        }
+        column.setColumnName(tenantColumn);
+
+        JdbcNamedParameter param = new JdbcNamedParameter();
+        param.setName(TENANT_PARAM_NAME);
+
+        EqualsTo equalsTo = new EqualsTo();
+        equalsTo.setLeftExpression(column);
+        equalsTo.setRightExpression(param);
+        return equalsTo;
+    }
+
+    /**
+     * 幂等检查：WHERE 表达式中是否已包含租户条件
+     */
+    private static boolean isTenantConditionExists(Expression whereExpression, String column,
+                                                    String tableAlias, String tableName) {
+        return isDeleteConditionExists(whereExpression, column, tableAlias, tableName);
+    }
+
+    /**
+     * 递归处理子查询中的租户条件
+     */
+    private static void processTenantSubQueries(PlainSelect plainSelect) {
+        if (plainSelect.getSelectItems() != null) {
+            for (SelectItem item : plainSelect.getSelectItems()) {
+                if (item.getExpression() instanceof ParenthesedSelect) {
+                    processTenantSelect(((ParenthesedSelect) item.getExpression()).getSelect());
+                }
+            }
+        }
+        if (plainSelect.getWhere() != null) {
+            processTenantExpressionSubQueries(plainSelect.getWhere());
+        }
+    }
+
+    private static void processTenantExpressionSubQueries(Expression expression) {
+        if (expression instanceof ParenthesedSelect) {
+            processTenantSelect(((ParenthesedSelect) expression).getSelect());
+        } else if (expression instanceof BinaryExpression) {
+            processTenantExpressionSubQueries(((BinaryExpression) expression).getLeftExpression());
+            processTenantExpressionSubQueries(((BinaryExpression) expression).getRightExpression());
+        }
+    }
+
+    /**
+     * 租户条件信息
+     */
+    private static class TableTenantCondition {
+        final String tableName;
+        final String alias;
+        final JoinType joinType;
+        final Join joinObject;
+
+        TableTenantCondition(String tableName, String alias, JoinType joinType, Join joinObject) {
+            this.tableName = tableName;
+            this.alias = alias;
+            this.joinType = joinType;
+            this.joinObject = joinObject;
+        }
+    }
+
+    // ===================== 逻辑删除条件处理 =====================
+
     /**
      * 处理SELECT语句，自动识别表并拼接删除条件
      */

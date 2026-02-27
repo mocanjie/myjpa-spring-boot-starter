@@ -1,6 +1,7 @@
 package io.github.mocanjie.base.myjpa.validation;
 
 import io.github.mocanjie.base.myjpa.cache.TableCacheManager;
+import io.github.mocanjie.base.myjpa.parser.JSqlDynamicSqlParser;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.Ordered;
@@ -136,6 +137,19 @@ public class DatabaseSchemaValidator implements Ordered {
                     result.addWarning(tableName, String.format("删除标记字段 '%s' 在表 '%s' 中不存在，已跳过删除条件拼接", delColumn, tableName));
                 } else {
                     result.addSuccess(tableName, String.format("删除标记字段 '%s' 验证通过", delColumn));
+                }
+            }
+
+            // 检查租户字段（如果启用了多租户隔离）
+            if (JSqlDynamicSqlParser.tenantEnabled) {
+                String tenantCol = JSqlDynamicSqlParser.tenantColumn;
+                if (tenantCol != null && !tenantCol.isEmpty()) {
+                    if (containsIgnoreCase(columns, tenantCol)) {
+                        TableCacheManager.registerTenantTable(tableName);
+                        result.addSuccess(tableName, String.format("租户字段 '%s' 存在，已启用租户隔离", tenantCol));
+                    } else {
+                        log.debug("表 '{}' 不包含租户字段 '{}'，不启用租户隔离", tableName, tenantCol);
+                    }
                 }
             }
 
