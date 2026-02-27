@@ -4,7 +4,7 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>io.github.mocanjie</groupId>
     <artifactId>myjpa-spring-boot-starter</artifactId>
-    <version>spring3</version>
+    <version>spring3-java21</version>
     <packaging>jar</packaging>
     <name>${project.artifactId}-${project.version}</name>
     <description>${project.artifactId}-${project.version}</description>
@@ -125,6 +125,14 @@
             <artifactId>commons-beanutils</artifactId>
             <version>${commons-beanutils.version}</version>
         </dependency>
+
+        <!-- 测试依赖 -->
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>5.10.1</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
 
@@ -145,6 +153,11 @@
                         </path>
                     </annotationProcessorPaths>
                 </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.2.2</version>
             </plugin>
         </plugins>
     </build>
