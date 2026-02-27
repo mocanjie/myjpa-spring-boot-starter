@@ -70,47 +70,54 @@ public class BaseDaoImpl implements IBaseDao {
 		return TenantContext.getTenantId();
 	}
 
-	/** 持有租户处理后的 SQL 和参数源 */
-	private record TenantResult(String sql, SqlParameterSource sps) {}
+	/** 持有处理后的 SQL 和参数源 */
+	private record ConditionResult(String sql, SqlParameterSource sps) {}
 
 	/**
-	 * 租户条件处理：仅当全局开启、未跳过、且 tenantId 非空时才改写 SQL 并追加参数。
-	 * tenantId=null（超管）时直接返回原 SQL 和原参数，避免出现找不到占位符参数的异常。
+	 * 统一条件处理入口：根据是否需要租户选择解析路径。
+	 *
+	 * <ul>
+	 *   <li>需要租户（enabled + 未跳过 + tenantId 非 null）→ 调用 {@code appendConditions}，
+	 *       单次解析同时注入逻辑删除条件和租户条件</li>
+	 *   <li>其他情况 → 调用 {@code appendDeleteCondition}，单次解析只注入逻辑删除条件</li>
+	 * </ul>
+	 *
+	 * tenantId=null（超管）时不改写 SQL，避免 :myjpaTenantId 占位符缺少参数导致运行时异常。
 	 */
-	private TenantResult applyTenant(String sql, SqlParameterSource sps) {
-		if (!JSqlDynamicSqlParser.tenantEnabled || TenantContext.isSkipped()) {
-			return new TenantResult(sql, sps);
+	private ConditionResult applyConditions(String sql, SqlParameterSource sps) {
+		boolean needTenant = JSqlDynamicSqlParser.tenantEnabled && !TenantContext.isSkipped();
+		Object tenantId = needTenant ? getCurrentTenantId() : null;
+
+		if (tenantId != null) {
+			// 单次解析：同时注入删除条件 + 租户条件
+			String processedSql = JSqlDynamicSqlParser.appendConditions(sql);
+			if (processedSql.contains(":" + JSqlDynamicSqlParser.TENANT_PARAM_NAME)) {
+				return new ConditionResult(processedSql,
+						new TenantAwareSqlParameterSource(sps, JSqlDynamicSqlParser.TENANT_PARAM_NAME, tenantId));
+			}
+			return new ConditionResult(processedSql, sps);
+		} else {
+			// 单次解析：只注入删除条件
+			return new ConditionResult(JSqlDynamicSqlParser.appendDeleteCondition(sql), sps);
 		}
-		Object tenantId = getCurrentTenantId();
-		if (tenantId == null) {
-			return new TenantResult(sql, sps); // 超管，不改写 SQL
-		}
-		String processedSql = JSqlDynamicSqlParser.appendTenantCondition(sql);
-		if (processedSql.contains(":" + JSqlDynamicSqlParser.TENANT_PARAM_NAME)) {
-			return new TenantResult(processedSql,
-					new TenantAwareSqlParameterSource(sps, JSqlDynamicSqlParser.TENANT_PARAM_NAME, tenantId));
-		}
-		return new TenantResult(processedSql, sps);
 	}
 
 	@Override
 	public <T> List<T> queryListForSql(String sql, Object param, Class<T> clazz) {
-		String processedSql = JSqlDynamicSqlParser.appendDeleteCondition(sql);
 		SqlParameterSource sps = param == null
 				? new EmptySqlParameterSource()
 				: new BeanPropertySqlParameterSource(param);
-		var tenant = applyTenant(processedSql, sps);
-		return namedParameterJdbcTemplate.query(tenant.sql(), tenant.sps(), getRowMapper(clazz));
+		var r = applyConditions(sql, sps);
+		return namedParameterJdbcTemplate.query(r.sql(), r.sps(), getRowMapper(clazz));
 	}
 
 	@Override
 	public <T> List<T> queryListForSql(String sql, Map<String, Object> param, Class<T> clazz) {
-		String processedSql = JSqlDynamicSqlParser.appendDeleteCondition(sql);
 		SqlParameterSource sps = (param == null || param.isEmpty())
 				? new EmptySqlParameterSource()
 				: new MapSqlParameterSource(param);
-		var tenant = applyTenant(processedSql, sps);
-		return namedParameterJdbcTemplate.query(tenant.sql(), tenant.sps(), getRowMapper(clazz));
+		var r = applyConditions(sql, sps);
+		return namedParameterJdbcTemplate.query(r.sql(), r.sps(), getRowMapper(clazz));
 	}
 
 	@Override
@@ -127,42 +134,40 @@ public class BaseDaoImpl implements IBaseDao {
 
 	@Override
 	public <T> Pager<T> queryPageForSql(String sql, Object param, Pager<T> pager, Class<T> clazz) {
-		String processedSql = JSqlDynamicSqlParser.appendDeleteCondition(sql);
 		SqlParameterSource sps = param == null
 				? new EmptySqlParameterSource()
 				: new BeanPropertySqlParameterSource(param);
-		var tenant = applyTenant(processedSql, sps);
+		var r = applyConditions(sql, sps);
 		if (!pager.getIgnoreCount()) {
-			String countSql = "select count(*) from ( " + tenant.sql() + " ) mkt_page_count";
-			pager.setTotalRows(namedParameterJdbcTemplate.queryForObject(countSql, tenant.sps(), new SingleColumnRowMapper<>(Long.class)));
+			String countSql = "select count(*) from ( " + r.sql() + " ) mkt_page_count";
+			pager.setTotalRows(namedParameterJdbcTemplate.queryForObject(countSql, r.sps(), new SingleColumnRowMapper<>(Long.class)));
 			if (pager.getTotalRows() > 0) {
-				pager.setPageData(namedParameterJdbcTemplate.query(SqlBuilder.buildPagerSql(tenant.sql(), pager), tenant.sps(), getRowMapper(clazz)));
+				pager.setPageData(namedParameterJdbcTemplate.query(SqlBuilder.buildPagerSql(r.sql(), pager), r.sps(), getRowMapper(clazz)));
 			} else {
 				pager.setPageData(new ArrayList<>());
 			}
 		} else {
-			pager.setPageData(namedParameterJdbcTemplate.query(SqlBuilder.buildPagerSql(tenant.sql(), pager), tenant.sps(), getRowMapper(clazz)));
+			pager.setPageData(namedParameterJdbcTemplate.query(SqlBuilder.buildPagerSql(r.sql(), pager), r.sps(), getRowMapper(clazz)));
 		}
 		return pager;
 	}
 
 	@Override
 	public <T> Pager<T> queryPageForSql(String sql, Map<String, Object> param, Pager<T> pager, Class<T> clazz) {
-		String processedSql = JSqlDynamicSqlParser.appendDeleteCondition(sql);
 		SqlParameterSource sps = (param == null || param.isEmpty())
 				? new EmptySqlParameterSource()
 				: new MapSqlParameterSource(param);
-		var tenant = applyTenant(processedSql, sps);
+		var r = applyConditions(sql, sps);
 		if (!pager.getIgnoreCount()) {
-			String countSql = "select count(*) from ( " + tenant.sql() + " ) mkt_page_count";
-			pager.setTotalRows(namedParameterJdbcTemplate.queryForObject(countSql, tenant.sps(), new SingleColumnRowMapper<>(Long.class)));
+			String countSql = "select count(*) from ( " + r.sql() + " ) mkt_page_count";
+			pager.setTotalRows(namedParameterJdbcTemplate.queryForObject(countSql, r.sps(), new SingleColumnRowMapper<>(Long.class)));
 			if (pager.getTotalRows() > 0) {
-				pager.setPageData(namedParameterJdbcTemplate.query(SqlBuilder.buildPagerSql(tenant.sql(), pager), tenant.sps(), getRowMapper(clazz)));
+				pager.setPageData(namedParameterJdbcTemplate.query(SqlBuilder.buildPagerSql(r.sql(), pager), r.sps(), getRowMapper(clazz)));
 			} else {
 				pager.setPageData(new ArrayList<>());
 			}
 		} else {
-			pager.setPageData(namedParameterJdbcTemplate.query(SqlBuilder.buildPagerSql(tenant.sql(), pager), tenant.sps(), getRowMapper(clazz)));
+			pager.setPageData(namedParameterJdbcTemplate.query(SqlBuilder.buildPagerSql(r.sql(), pager), r.sps(), getRowMapper(clazz)));
 		}
 		return pager;
 	}

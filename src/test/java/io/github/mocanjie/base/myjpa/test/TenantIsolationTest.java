@@ -22,6 +22,7 @@ import static org.junit.jupiter.api.Assertions.*;
  *  - TenantAwareSqlParameterSource 参数包装
  *  - 无 tenant_id 字段的表不注入
  *  - 删除条件 + 租户条件同时注入
+ *  - appendConditions 合并路径（单次解析，等价性 + 幂等性）
  */
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 @DisplayName("多租户隔离功能测试")
@@ -402,6 +403,88 @@ class TenantIsolationTest {
         String result = JSqlDynamicSqlParser.appendTenantCondition(sql);
         int count = countOccurrences(result, ":myjpaTenantId");
         assertEquals(2, count, "UNION 两边的 user 表各应注入一次租户条件，共2次");
+    }
+
+    // =========================================================
+    // 11. appendConditions 合并路径（单次解析）
+    // =========================================================
+
+    @Test
+    @Order(24)
+    @DisplayName("11.1 appendConditions 等价于先删除条件再租户条件的分步结果")
+    void test24_appendConditionsEquivalentToStepByStep() {
+        String sql = "SELECT * FROM user WHERE age > 18";
+
+        // 分步（两次解析）
+        String step1 = JSqlDynamicSqlParser.appendDeleteCondition(sql);
+        String stepByStep = JSqlDynamicSqlParser.appendTenantCondition(step1);
+
+        // 合并（一次解析）
+        String combined = JSqlDynamicSqlParser.appendConditions(sql);
+
+        // 两者包含的关键条件应一致
+        assertTrue(combined.contains("delete_flag"), "合并路径应包含逻辑删除条件");
+        assertTrue(combined.contains("tenant_id = :myjpaTenantId"), "合并路径应包含租户条件");
+        assertTrue(stepByStep.contains("delete_flag"), "分步路径应包含逻辑删除条件");
+        assertTrue(stepByStep.contains("tenant_id = :myjpaTenantId"), "分步路径应包含租户条件");
+    }
+
+    @Test
+    @Order(25)
+    @DisplayName("11.2 appendConditions 在租户关闭时仍注入逻辑删除条件")
+    void test25_appendConditionsWithTenantDisabledStillInjectsDelete() {
+        JSqlDynamicSqlParser.tenantEnabled = false;
+        try {
+            String result = JSqlDynamicSqlParser.appendConditions("SELECT * FROM user");
+            assertTrue(result.contains("delete_flag"), "租户关闭时仍应注入逻辑删除条件");
+            assertFalse(result.contains(":myjpaTenantId"), "租户关闭时不应注入租户条件");
+        } finally {
+            JSqlDynamicSqlParser.tenantEnabled = true;
+        }
+    }
+
+    @Test
+    @Order(26)
+    @DisplayName("11.3 appendConditions 在 LEFT JOIN 中同时处理两类条件")
+    void test26_appendConditionsJoinBothConditions() {
+        TableCacheManager.registerTenantTable("role");
+        try {
+            String sql = "SELECT u.id, r.role_name FROM user u LEFT JOIN role r ON u.role_id = r.id";
+            String result = JSqlDynamicSqlParser.appendConditions(sql);
+
+            // user 主表：删除+租户 在 WHERE
+            assertTrue(result.contains("u.delete_flag"), "user 删除条件应在 WHERE");
+            assertTrue(result.contains("u.tenant_id = :myjpaTenantId"), "user 租户条件应在 WHERE");
+            // role LEFT JOIN：删除+租户 在 ON
+            assertTrue(result.contains("r.is_deleted"), "role 删除条件应在 ON");
+            assertTrue(result.contains("r.tenant_id = :myjpaTenantId"), "role 租户条件应在 ON");
+            // :myjpaTenantId 应出现 2 次（user 和 role 各一次）
+            assertEquals(2, countOccurrences(result, ":myjpaTenantId"),
+                    ":myjpaTenantId 应在 user 和 role 各出现一次");
+        } finally {
+            TableCacheManager.clearCache();
+            TableCacheManager.initCache("io.github.mocanjie.base.myjpa.test.entity");
+            TableCacheManager.registerTenantTable("user");
+        }
+    }
+
+    @Test
+    @Order(27)
+    @DisplayName("11.4 appendConditions 幂等性")
+    void test27_appendConditionsIdempotent() {
+        String sql = "SELECT * FROM user";
+        String once = JSqlDynamicSqlParser.appendConditions(sql);
+        String twice = JSqlDynamicSqlParser.appendConditions(once);
+        assertEquals(once, twice, "appendConditions 多次调用应幂等");
+    }
+
+    @Test
+    @Order(28)
+    @DisplayName("11.5 无 @MyTable 缓存的表，appendConditions 返回原 SQL")
+    void test28_appendConditionsUnknownTable() {
+        String sql = "SELECT * FROM audit_log WHERE action = 'LOGIN'";
+        String result = JSqlDynamicSqlParser.appendConditions(sql);
+        assertEquals(sql, result, "无缓存配置的表不应被修改");
     }
 
     // =========================================================

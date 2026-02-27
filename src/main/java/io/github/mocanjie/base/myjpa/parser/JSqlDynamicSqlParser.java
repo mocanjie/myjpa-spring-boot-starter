@@ -307,6 +307,212 @@ public class JSqlDynamicSqlParser {
         }
     }
 
+    // ===================== 合并处理（单次解析同时注入逻辑删除 + 租户条件）=====================
+
+    /**
+     * 一次 SQL 解析，同时注入逻辑删除条件和租户隔离条件。
+     *
+     * <p>仅在租户功能开启且 tenantId 非 null 时由 BaseDaoImpl 调用，
+     * 调用前 TenantContext.isSkipped() 已检查，此处无需重复判断。
+     *
+     * @param sql 原始 SQL
+     * @return 注入两类条件后的 SQL
+     */
+    public static String appendConditions(String sql) {
+        if (sql == null || sql.trim().isEmpty()) {
+            return sql;
+        }
+        try {
+            Statement statement = CCJSqlParserUtil.parse(sql);
+            if (!(statement instanceof Select)) {
+                return sql;
+            }
+            Select selectStatement = (Select) statement;
+            processUnifiedSelect(selectStatement);
+            return selectStatement.toString();
+        } catch (JSQLParserException e) {
+            log.warn("解析SQL时发生异常（合并条件），返回原始SQL: {}, 异常: {}", sql, e.getMessage());
+            return sql;
+        } catch (Exception e) {
+            log.error("处理SQL时发生未知异常（合并条件），返回原始SQL: {}", sql, e);
+            return sql;
+        }
+    }
+
+    private static void processUnifiedSelect(Select select) {
+        if (select instanceof PlainSelect) {
+            processUnifiedPlainSelect((PlainSelect) select);
+        } else if (select instanceof SetOperationList) {
+            for (Select s : ((SetOperationList) select).getSelects()) {
+                processUnifiedSelect(s);
+            }
+        }
+    }
+
+    private static void processUnifiedPlainSelect(PlainSelect plainSelect) {
+        List<UnifiedTableConditions> whereConditions = new ArrayList<>();
+        List<UnifiedTableConditions> joinConditions = new ArrayList<>();
+
+        Expression existingWhere = plainSelect.getWhere();
+
+        // 主表
+        if (plainSelect.getFromItem() instanceof Table) {
+            collectUnifiedConditions((Table) plainSelect.getFromItem(), existingWhere,
+                    JoinType.FROM_TABLE, null, whereConditions, joinConditions);
+        } else if (plainSelect.getFromItem() instanceof ParenthesedSelect) {
+            processUnifiedSelect(((ParenthesedSelect) plainSelect.getFromItem()).getSelect());
+        }
+
+        // JOIN 表
+        if (plainSelect.getJoins() != null) {
+            for (Join join : plainSelect.getJoins()) {
+                if (join.getRightItem() instanceof Table) {
+                    collectUnifiedConditions((Table) join.getRightItem(), existingWhere,
+                            getJoinType(join), join, whereConditions, joinConditions);
+                } else if (join.getRightItem() instanceof ParenthesedSelect) {
+                    processUnifiedSelect(((ParenthesedSelect) join.getRightItem()).getSelect());
+                }
+            }
+        }
+
+        // 注入 WHERE 条件
+        if (!whereConditions.isEmpty()) {
+            Expression allConditions = buildUnifiedWhereExpression(whereConditions);
+            Expression currentWhere = plainSelect.getWhere();
+            plainSelect.setWhere(currentWhere != null
+                    ? new AndExpression(currentWhere, allConditions)
+                    : allConditions);
+        }
+
+        // 注入 JOIN ON 条件
+        for (UnifiedTableConditions utc : joinConditions) {
+            applyUnifiedConditionsToJoinOn(utc);
+        }
+
+        // 递归处理子查询
+        processUnifiedSubQueries(plainSelect);
+    }
+
+    /**
+     * 收集单个表所有需要注入的条件（逻辑删除 + 租户），并按 JOIN 类型分组
+     */
+    private static void collectUnifiedConditions(Table table, Expression existingWhere,
+                                                  JoinType joinType, Join joinObject,
+                                                  List<UnifiedTableConditions> whereConditions,
+                                                  List<UnifiedTableConditions> joinConditions) {
+        String tableName = table.getName();
+        String alias = table.getAlias() != null ? table.getAlias().getName() : null;
+        String tableRef = alias != null ? alias : tableName;
+
+        List<Expression> exprs = new ArrayList<>();
+
+        // 1. 逻辑删除条件
+        TableCacheManager.DeleteInfo deleteInfo = TableCacheManager.getDeleteInfoByTableName(tableName);
+        if (deleteInfo != null && deleteInfo.isValid()
+                && !isDeleteConditionExists(existingWhere, deleteInfo.getDelColumn(), alias, tableName)) {
+            Column col = new Column();
+            col.setTable(new Table(tableRef));
+            col.setColumnName(deleteInfo.getDelColumn());
+            EqualsTo eq = new EqualsTo();
+            eq.setLeftExpression(col);
+            eq.setRightExpression(new LongValue(deleteInfo.getUnDelValue()));
+            exprs.add(eq);
+        }
+
+        // 2. 租户条件
+        if (tenantEnabled && TableCacheManager.hasTenantColumn(tableName)
+                && !isDeleteConditionExists(existingWhere, tenantColumn, alias, tableName)) {
+            exprs.add(createTenantConditionExpression(tableRef));
+        }
+
+        if (exprs.isEmpty()) return;
+
+        UnifiedTableConditions utc = new UnifiedTableConditions(tableName, alias, joinType, joinObject, exprs);
+        if (joinType == JoinType.LEFT_JOIN || joinType == JoinType.RIGHT_JOIN) {
+            joinConditions.add(utc);
+        } else {
+            whereConditions.add(utc);
+        }
+        log.debug("表 {}({}) 收集到 {} 个条件，将添加到 {}", tableName, joinType, exprs.size(),
+                (joinType == JoinType.LEFT_JOIN || joinType == JoinType.RIGHT_JOIN) ? "JOIN ON" : "WHERE");
+    }
+
+    private static Expression buildUnifiedWhereExpression(List<UnifiedTableConditions> conditions) {
+        Expression result = null;
+        for (UnifiedTableConditions utc : conditions) {
+            for (Expression expr : utc.expressions) {
+                result = (result == null) ? expr : new AndExpression(result, expr);
+            }
+        }
+        return result;
+    }
+
+    private static void applyUnifiedConditionsToJoinOn(UnifiedTableConditions utc) {
+        if (utc.joinObject == null) return;
+
+        Expression newConditions = null;
+        for (Expression expr : utc.expressions) {
+            newConditions = (newConditions == null) ? expr : new AndExpression(newConditions, expr);
+        }
+
+        Collection<Expression> onExpressions = utc.joinObject.getOnExpressions();
+        if (onExpressions != null && !onExpressions.isEmpty()) {
+            Expression combined = null;
+            for (Expression expr : onExpressions) {
+                combined = (combined == null) ? expr : new AndExpression(combined, expr);
+            }
+            List<Expression> newExprs = new ArrayList<>();
+            newExprs.add(new AndExpression(combined, newConditions));
+            utc.joinObject.setOnExpressions(newExprs);
+        } else {
+            List<Expression> newExprs = new ArrayList<>();
+            newExprs.add(newConditions);
+            utc.joinObject.setOnExpressions(newExprs);
+        }
+    }
+
+    private static void processUnifiedSubQueries(PlainSelect plainSelect) {
+        if (plainSelect.getSelectItems() != null) {
+            for (SelectItem item : plainSelect.getSelectItems()) {
+                if (item.getExpression() instanceof ParenthesedSelect) {
+                    processUnifiedSelect(((ParenthesedSelect) item.getExpression()).getSelect());
+                }
+            }
+        }
+        if (plainSelect.getWhere() != null) {
+            processUnifiedExpressionSubQueries(plainSelect.getWhere());
+        }
+    }
+
+    private static void processUnifiedExpressionSubQueries(Expression expression) {
+        if (expression instanceof ParenthesedSelect) {
+            processUnifiedSelect(((ParenthesedSelect) expression).getSelect());
+        } else if (expression instanceof BinaryExpression) {
+            processUnifiedExpressionSubQueries(((BinaryExpression) expression).getLeftExpression());
+            processUnifiedExpressionSubQueries(((BinaryExpression) expression).getRightExpression());
+        }
+    }
+
+    /**
+     * 单个表收集到的所有条件（逻辑删除 + 租户），及其 JOIN 元数据
+     */
+    private static class UnifiedTableConditions {
+        final String tableName;
+        final String alias;
+        final JoinType joinType;
+        final Join joinObject;
+        final List<Expression> expressions;
+
+        UnifiedTableConditions(String tableName, String alias, JoinType joinType,
+                               Join joinObject, List<Expression> expressions) {
+            this.tableName = tableName;
+            this.alias = alias;
+            this.joinType = joinType;
+            this.joinObject = joinObject;
+            this.expressions = expressions;
+        }
+    }
+
     // ===================== 逻辑删除条件处理 =====================
 
     /**
