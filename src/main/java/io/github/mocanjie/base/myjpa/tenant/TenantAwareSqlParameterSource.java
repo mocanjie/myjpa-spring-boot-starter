@@ -38,7 +38,7 @@ public class TenantAwareSqlParameterSource implements SqlParameterSource {
     }
 
     @Override
-    public Integer getSqlType(String paramName) {
+    public int getSqlType(String paramName) {
         if (tenantParamName.equals(paramName)) {
             return TYPE_UNKNOWN;
         }

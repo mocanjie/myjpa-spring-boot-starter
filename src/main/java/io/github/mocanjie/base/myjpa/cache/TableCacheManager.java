@@ -7,6 +7,7 @@ import org.springframework.beans.factory.config.BeanDefinition;
 import org.springframework.context.annotation.ClassPathScanningCandidateComponentProvider;
 import org.springframework.core.type.filter.AnnotationTypeFilter;
 
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
@@ -47,6 +48,12 @@ public class TableCacheManager {
      * value: PkInfo对象，包含主键字段名和属性名
      */
     private static final Map<String, PkInfo> TABLE_PK_INFO_CACHE = new ConcurrentHashMap<>();
+
+    /**
+     * 缓存支持租户隔离的表名集合（数据库中实际存在租户字段的表）
+     * 由 DatabaseSchemaValidator 在启动时扫描数据库后填充
+     */
+    private static final Set<String> TABLE_TENANT_CACHE = Collections.newSetFromMap(new ConcurrentHashMap<>());
     
     /**
      * 删除条件信息
@@ -275,6 +282,28 @@ public class TableCacheManager {
     }
     
     /**
+     * 注册支持租户隔离的表（由 DatabaseSchemaValidator 在启动时调用）
+     *
+     * @param tableName 表名
+     */
+    public static void registerTenantTable(String tableName) {
+        if (tableName == null) return;
+        TABLE_TENANT_CACHE.add(tableName.toLowerCase());
+        log.info("注册租户隔离表: {}", tableName);
+    }
+
+    /**
+     * 检查表是否支持租户隔离（数据库中存在租户字段）
+     *
+     * @param tableName 表名
+     * @return 如果该表有租户字段返回 true
+     */
+    public static boolean hasTenantColumn(String tableName) {
+        if (tableName == null) return false;
+        return TABLE_TENANT_CACHE.contains(tableName.toLowerCase());
+    }
+
+    /**
      * 清空缓存
      */
     public static void clearCache() {
@@ -282,6 +311,7 @@ public class TableCacheManager {
         CLASS_DELETE_INFO_CACHE.clear();
         CLASS_TABLE_NAME_CACHE.clear();
         TABLE_PK_INFO_CACHE.clear();
+        TABLE_TENANT_CACHE.clear();
         log.info("@MyTable注解缓存已清空");
     }
     

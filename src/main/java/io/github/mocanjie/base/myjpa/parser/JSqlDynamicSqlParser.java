@@ -23,8 +23,19 @@ import java.util.*;
  * 提供更加精确和可靠的SQL解析和删除条件拼接功能
  */
 public class JSqlDynamicSqlParser {
-    
+
     private static final Logger log = LoggerFactory.getLogger(JSqlDynamicSqlParser.class);
+
+    // ===================== 租户配置（由 MyJpaAutoConfiguration 初始化时设置）=====================
+
+    /** 是否启用多租户隔离，默认 true */
+    public static volatile boolean tenantEnabled = true;
+
+    /** 租户字段的数据库列名，默认 tenant_id */
+    public static volatile String tenantColumn = "tenant_id";
+
+    /** 租户参数名（SQL 占位符名称），内部固定，不对外暴露 */
+    public static final String TENANT_PARAM_NAME = "myjpaTenantId";
     
     /**
      * 为SQL自动拼接逻辑删除条件

@@ -4,6 +4,7 @@ import io.github.mocanjie.base.myjpa.builder.SqlBuilder;
 import io.github.mocanjie.base.myjpa.builder.TableInfoBuilder;
 import io.github.mocanjie.base.myjpa.dao.IBaseDao;
 import io.github.mocanjie.base.myjpa.dao.impl.BaseDaoImpl;
+import io.github.mocanjie.base.myjpa.parser.JSqlDynamicSqlParser;
 import io.github.mocanjie.base.myjpa.service.IBaseService;
 import io.github.mocanjie.base.myjpa.service.impl.BaseServiceImpl;
 import io.github.mocanjie.base.myjpa.validation.DatabaseSchemaValidator;
@@ -30,9 +31,15 @@ public class MyJpaAutoConfiguration implements BeanPostProcessor, Ordered {
 
     @Value("${myjpa.showsql:true}")
     public boolean showSql;
-    
+
     @Value("${myjpa.validate-schema:true}")
     public boolean validateSchema;
+
+    @Value("${myjpa.tenant.enabled:true}")
+    public boolean tenantEnabled;
+
+    @Value("${myjpa.tenant.column:tenant_id}")
+    public String tenantColumn;
 
     @Bean
     @Primary
@@ -78,6 +85,10 @@ public class MyJpaAutoConfiguration implements BeanPostProcessor, Ordered {
 
     @PostConstruct
     void logInit(){
+        // 将租户配置同步到解析器静态字段
+        JSqlDynamicSqlParser.tenantEnabled = tenantEnabled;
+        JSqlDynamicSqlParser.tenantColumn = tenantColumn;
+
         try {
             // 使用反射来兼容不同的日志实现
             Object loggerContext = LoggerFactory.getILoggerFactory();
