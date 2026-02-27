@@ -8,17 +8,17 @@ This is a Spring Boot starter (`myjpa-spring-boot-starter`) that provides simpli
 ## Common Development Commands
 
 ```bash
-# Build and compile
-mvn clean compile
+# Build and compile (requires JDK 21)
+JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home mvn clean compile
 
 # Create JAR package
-mvn clean package
+JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home mvn clean package
 
 # Install to local Maven repository
-mvn clean install
+JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home mvn clean install
 
 # Deploy to Maven Central (requires release profile)
-mvn clean deploy -P release
+JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home mvn clean deploy -P release
 ```
 
 ## Architecture Overview
@@ -29,6 +29,7 @@ mvn clean deploy -P release
 - **DAO Layer**: `IBaseDao` + `BaseDaoImpl` handle data access via Spring JDBC Template
 - **SQL Generation**: `SqlBuilder` with database-specific implementations (MySQL, Oracle, SQL Server, PostgreSQL, KingbaseES)
 - **Metadata Management**: `TableInfoBuilder` scans `@MyTable` annotations at startup
+- **SQL Parser**: `JSqlDynamicSqlParser` automatically injects logical delete conditions into all SELECT queries
 
 ### Key Annotations
 - `@MyTable`: Maps entity classes to database tables with optional logical deletion support
@@ -38,6 +39,33 @@ mvn clean deploy -P release
 Multi-database support implemented through `SqlBuilder` variants. Database type detection happens in `BaseDaoImpl` constructor.
 
 ## Important Implementation Details
+
+### Automatic Logical Delete Condition Injection
+All query methods (`queryListForSql`, `querySingleForSql`, `queryPageForSql`, `queryById`, `querySingleByField`) automatically inject logical delete conditions via `JSqlDynamicSqlParser.appendDeleteCondition()`. There are no separate `WithDeleteCondition` methods — the standard methods handle everything.
+
+The parser is idempotent: it checks `isDeleteConditionExists` before appending, so conditions are never duplicated even when methods delegate to each other internally.
+
+### JOIN Condition Optimization
+- **Main table (FROM)**: Delete conditions added to WHERE clause
+- **LEFT/RIGHT JOIN**: Delete conditions added to JOIN ON clause (preserves outer join semantics)
+- **INNER JOIN**: Delete conditions added to WHERE clause (better performance)
+
+Tables without a configured `@MyTable` delete field are left untouched.
+
+### SQL Transformation Examples
+```sql
+-- Original
+SELECT * FROM user
+
+-- Auto-transformed
+SELECT * FROM user WHERE user.delete_flag = 0
+
+-- JOIN queries
+SELECT u.*, r.role_name FROM user u LEFT JOIN role r ON u.role_id = r.id
+-- Becomes
+SELECT u.*, r.role_name FROM user u LEFT JOIN role r ON u.role_id = r.id AND r.is_deleted = 0
+WHERE u.delete_flag = 0
+```
 
 ### Logging Configuration
 - Uses Log4j2 instead of Spring Boot's default Logback
@@ -56,50 +84,14 @@ Heavy use of reflection for:
 - Dynamic SQL generation based on entity structure
 
 ### Dependencies
-- Spring Boot 2.7.14 (via spring-boot-starter-jdbc)
-- Custom `mycommon` library (version 2401)
-- Reflections library for annotation scanning
+- Java 21
+- Spring Boot 3.2.0 (via spring-boot-starter-jdbc)
+- Custom `mycommon` library (version spring3)
+- JSqlParser 5.3 for SQL parsing
 - Log4j2 for logging
 
 ## Testing Notes
 Currently no unit tests exist. When adding tests, use Spring Boot testing conventions with `src/test/java` structure.
-
-## New Features (Dynamic SQL with Delete Conditions)
-
-### Core Components
-- **TableCacheManager**: Caches @MyTable annotation information at startup
-- **DynamicSqlParser**: Automatically appends delete conditions to SELECT queries
-- **Enhanced IBaseDao**: New query methods with automatic delete condition support
-
-### New Query Methods
-- `queryListForSqlWithDeleteCondition()`: Auto-detect tables and append delete conditions
-- `queryPageForSqlWithDeleteCondition()`: Paginated queries with delete conditions
-- `querySingleForSqlWithDeleteCondition()`: Single record queries with delete conditions
-
-### SQL Transformation Examples
-```sql
--- Original
-SELECT * FROM user
-
--- Auto-transformed  
-SELECT * FROM user WHERE user.delete_flag = 0
-
--- JOIN queries
-SELECT u.*, r.role_name FROM user u LEFT JOIN role r ON u.role_id = r.id
--- Becomes
-SELECT u.*, r.role_name FROM user u LEFT JOIN role r ON u.role_id = r.id 
-WHERE u.delete_flag = 0 AND r.is_deleted = 1
-```
-
-### Usage Patterns
-1. **Automatic mode**: Based on table names in SQL
-2. **Original mode**: Use existing methods when no delete condition filtering needed
-
-### JOIN Condition Optimization
-The system intelligently handles different JOIN types to preserve SQL semantics:
-- **Main table (FROM)**: Delete conditions in WHERE clause
-- **LEFT/RIGHT JOIN**: Delete conditions in JOIN ON clause (preserves outer join semantics)
-- **INNER JOIN**: Delete conditions in WHERE clause (better performance)
 
 ## Configuration Properties
 - `myjpa.showsql`: Enable/disable SQL statement logging
