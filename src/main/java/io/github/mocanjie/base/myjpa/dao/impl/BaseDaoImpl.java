@@ -9,6 +9,9 @@ import io.github.mocanjie.base.myjpa.metadata.TableInfo;
 import io.github.mocanjie.base.myjpa.parser.JSqlDynamicSqlParser;
 import io.github.mocanjie.base.myjpa.parser.SqlParser;
 import io.github.mocanjie.base.myjpa.rowmapper.MyBeanPropertyRowMapper;
+import io.github.mocanjie.base.myjpa.tenant.TenantAwareSqlParameterSource;
+import io.github.mocanjie.base.myjpa.tenant.TenantContext;
+import io.github.mocanjie.base.myjpa.tenant.TenantIdProvider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.BeanUtils;
@@ -47,25 +50,63 @@ public class BaseDaoImpl implements IBaseDao {
 	@Autowired
 	protected NamedParameterJdbcTemplate namedParameterJdbcTemplate;
 
+	/** 租户ID提供者（SPI），集成方注册 Bean 后自动注入；未注册则为 null */
+	@Autowired(required = false)
+	private TenantIdProvider tenantIdProvider;
+
 	protected JdbcTemplate getJdbcTemplate() {
 		return (JdbcTemplate) this.namedParameterJdbcTemplate.getJdbcOperations();
+	}
+
+	/**
+	 * 获取当前租户ID
+	 * 优先级：TenantIdProvider SPI > TenantContext ThreadLocal
+	 * 返回 null 表示超级管理员，不注入租户条件
+	 */
+	private Object getCurrentTenantId() {
+		if (tenantIdProvider != null) {
+			return tenantIdProvider.getTenantId();
+		}
+		return TenantContext.getTenantId();
+	}
+
+	/**
+	 * 在 appendTenantCondition 之后，用 TenantAwareSqlParameterSource 包装原有参数，
+	 * 仅当 SQL 中确实注入了 :myjpaTenantId 占位符时才包装（避免多余的包装开销）
+	 */
+	private SqlParameterSource wrapWithTenant(SqlParameterSource original, String processedSql) {
+		if (!JSqlDynamicSqlParser.tenantEnabled || TenantContext.isSkipped()) {
+			return original;
+		}
+		Object tenantId = getCurrentTenantId();
+		if (tenantId == null) {
+			return original; // 超管，不注入
+		}
+		if (processedSql.contains(":" + JSqlDynamicSqlParser.TENANT_PARAM_NAME)) {
+			return new TenantAwareSqlParameterSource(original, JSqlDynamicSqlParser.TENANT_PARAM_NAME, tenantId);
+		}
+		return original;
 	}
 
 	@Override
 	public <T> List<T> queryListForSql(String sql, Object param, Class<T> clazz) {
 		String processedSql = JSqlDynamicSqlParser.appendDeleteCondition(sql);
+		processedSql = JSqlDynamicSqlParser.appendTenantCondition(processedSql);
 		SqlParameterSource sps = param == null
 				? new EmptySqlParameterSource()
 				: new BeanPropertySqlParameterSource(param);
+		sps = wrapWithTenant(sps, processedSql);
 		return namedParameterJdbcTemplate.query(processedSql, sps, getRowMapper(clazz));
 	}
 
 	@Override
 	public <T> List<T> queryListForSql(String sql, Map<String, Object> param, Class<T> clazz) {
 		String processedSql = JSqlDynamicSqlParser.appendDeleteCondition(sql);
+		processedSql = JSqlDynamicSqlParser.appendTenantCondition(processedSql);
 		SqlParameterSource sps = (param == null || param.isEmpty())
 				? new EmptySqlParameterSource()
 				: new MapSqlParameterSource(param);
+		sps = wrapWithTenant(sps, processedSql);
 		return namedParameterJdbcTemplate.query(processedSql, sps, getRowMapper(clazz));
 	}
 
@@ -84,9 +125,11 @@ public class BaseDaoImpl implements IBaseDao {
 	@Override
 	public <T> Pager<T> queryPageForSql(String sql, Object param, Pager<T> pager, Class<T> clazz) {
 		String processedSql = JSqlDynamicSqlParser.appendDeleteCondition(sql);
+		processedSql = JSqlDynamicSqlParser.appendTenantCondition(processedSql);
 		SqlParameterSource sps = param == null
 				? new EmptySqlParameterSource()
 				: new BeanPropertySqlParameterSource(param);
+		sps = wrapWithTenant(sps, processedSql);
 		if (!pager.getIgnoreCount()) {
 			String countSql = "select count(*) from ( " + processedSql + " ) mkt_page_count";
 			pager.setTotalRows(namedParameterJdbcTemplate.queryForObject(countSql, sps, new SingleColumnRowMapper<>(Long.class)));
@@ -104,9 +147,11 @@ public class BaseDaoImpl implements IBaseDao {
 	@Override
 	public <T> Pager<T> queryPageForSql(String sql, Map<String, Object> param, Pager<T> pager, Class<T> clazz) {
 		String processedSql = JSqlDynamicSqlParser.appendDeleteCondition(sql);
+		processedSql = JSqlDynamicSqlParser.appendTenantCondition(processedSql);
 		SqlParameterSource sps = (param == null || param.isEmpty())
 				? new EmptySqlParameterSource()
 				: new MapSqlParameterSource(param);
+		sps = wrapWithTenant(sps, processedSql);
 		if (!pager.getIgnoreCount()) {
 			String countSql = "select count(*) from ( " + processedSql + " ) mkt_page_count";
 			pager.setTotalRows(namedParameterJdbcTemplate.queryForObject(countSql, sps, new SingleColumnRowMapper<>(Long.class)));
