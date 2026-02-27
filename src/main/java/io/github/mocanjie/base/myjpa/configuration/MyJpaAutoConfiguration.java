@@ -35,7 +35,7 @@ public class MyJpaAutoConfiguration implements BeanPostProcessor, Ordered {
     @Value("${myjpa.validate-schema:true}")
     public boolean validateSchema;
 
-    @Value("${myjpa.tenant.enabled:true}")
+    @Value("${myjpa.tenant.enabled:false}")
     public boolean tenantEnabled;
 
     @Value("${myjpa.tenant.column:tenant_id}")

@@ -30,8 +30,8 @@ public class JSqlDynamicSqlParser {
 
     // ===================== 租户配置（由 MyJpaAutoConfiguration 初始化时设置）=====================
 
-    /** 是否启用多租户隔离，默认 true */
-    public static volatile boolean tenantEnabled = true;
+    /** 是否启用多租户隔离，默认 false（需显式配置 myjpa.tenant.enabled=true 开启） */
+    public static volatile boolean tenantEnabled = false;
 
     /** 租户字段的数据库列名，默认 tenant_id */
     public static volatile String tenantColumn = "tenant_id";
