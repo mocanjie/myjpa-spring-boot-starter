@@ -232,57 +232,33 @@ public class UserService extends BaseServiceImpl<User> {
 <PO> int delByIds(Class<PO> clazz, Object... id);  // 批量删除（支持可变参数）
 ```
 
-### IBaseDao 接口（高级功能）
+### 自动逻辑删除条件注入
 
-除了上述基础方法外，`IBaseDao` 还提供**自动添加逻辑删除条件**的查询方法：
-
-#### 智能删除条件查询
-```java
-// 查询列表（自动添加逻辑删除条件）
-<T> List<T> queryListForSqlWithDeleteCondition(String sql, Object param, Class<T> clazz);
-<T> List<T> queryListForSqlWithDeleteCondition(String sql, Map<String, Object> param, Class<T> clazz);
-
-// 查询单条（自动添加逻辑删除条件）
-<T> T querySingleForSqlWithDeleteCondition(String sql, Object param, Class<T> clazz);
-<T> T querySingleForSqlWithDeleteCondition(String sql, Map<String, Object> param, Class<T> clazz);
-
-// 分页查询（自动添加逻辑删除条件）
-<T> Pager<T> queryPageForSqlWithDeleteCondition(String sql, Object param, Pager<T> pager, Class<T> clazz);
-<T> Pager<T> queryPageForSqlWithDeleteCondition(String sql, Map<String, Object> param, Pager<T> pager, Class<T> clazz);
-
-// 根据ID查询（自动添加逻辑删除条件）
-<PO> PO queryByIdWithDeleteCondition(Object id, Class<PO> clazz);
-
-// 根据字段查询（自动添加逻辑删除条件）
-<PO> PO querySingleByFieldWithDeleteCondition(String fieldName, String fieldValue, Class<PO> clazz);
-```
-
-**使用示例：**
+所有查询方法均已内置智能删除条件注入，**无需任何额外调用**。框架会自动解析 SQL 中涉及的表名，对配置了 `@MyTable` 逻辑删除字段的表追加对应条件。
 
 ```java
 @Service
 public class UserService extends BaseServiceImpl<User> {
 
-    @Autowired
-    private IBaseDao baseDao;  // 注入IBaseDao使用高级功能
-
-    public void advancedQuery() {
-        // 自动为SQL中的所有表添加逻辑删除条件
+    public void example() {
         Map<String, Object> params = new HashMap<>();
         params.put("age", 18);
 
-        // 原始SQL：SELECT * FROM sys_user WHERE age > :age
-        // 自动转换为：SELECT * FROM sys_user WHERE age > :age AND sys_user.delete_flag = 0
-        List<User> users = baseDao.queryListForSqlWithDeleteCondition(
+        // 写普通 SQL 即可，框架自动追加删除条件
+        // 实际执行：SELECT * FROM sys_user WHERE age > :age AND sys_user.delete_flag = 0
+        List<User> users = queryListForSql(
             "SELECT * FROM sys_user WHERE age > :age",
             params,
             User.class
         );
 
-        // JOIN查询也会自动处理
-        // 原始SQL：SELECT u.*, r.role_name FROM sys_user u LEFT JOIN role r ON u.role_id = r.id
-        // 自动转换：添加各表的删除条件到相应位置（WHERE或ON子句）
-        List<UserVO> userWithRoles = baseDao.queryListForSqlWithDeleteCondition(
+        // JOIN 查询同样自动处理，LEFT JOIN 条件追加到 ON 子句
+        // 实际执行：
+        //   SELECT u.*, r.role_name
+        //   FROM sys_user u
+        //   LEFT JOIN role r ON u.role_id = r.id AND r.is_deleted = 0
+        //   WHERE u.age > :age AND u.delete_flag = 0
+        List<UserVO> userWithRoles = queryListForSql(
             "SELECT u.*, r.role_name FROM sys_user u LEFT JOIN role r ON u.role_id = r.id WHERE u.age > :age",
             params,
             UserVO.class
@@ -290,6 +266,8 @@ public class UserService extends BaseServiceImpl<User> {
     }
 }
 ```
+
+> **注意：** 若某张表未配置 `@MyTable` 逻辑删除字段，框架不会对该表追加任何条件，行为与普通查询完全一致。
 
 ### 参数绑定说明
 
@@ -378,7 +356,7 @@ mvn clean deploy -P release
 
 ## 📋 系统要求
 
-- Java 17+
+- Java 21+
 - Spring Boot 3.x
 - Maven 3.6+
 
