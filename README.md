@@ -50,6 +50,14 @@ WHERE u.delete_flag = 0
 - **LEFT/RIGHT JOIN**：条件添加到 ON 子句，保留外连接语义
 - **INNER JOIN**：条件添加到 WHERE 子句，优化查询性能
 
+### 🏢 多租户隔离（可选）
+
+基于数据库列自动检测，零侵入接入多租户支持：
+- 启动时扫描数据库，自动发现含有 `tenant_id` 列（可配置）的表
+- 查询时自动追加 `AND table.tenant_id = :tenantId` 条件，无需手动拼接
+- `tenantId = null` 时视为超级管理员，跳过过滤
+- 支持方法级临时跳过
+
 ### 📦 零配置包扫描
 - 自动检测主应用包路径
 - 智能扫描 `@MyTable` 注解的实体类
@@ -84,7 +92,11 @@ spring:
 
 # 可选配置
 myjpa:
-  showsql: true  # 显示 SQL 日志
+  showsql: true          # 显示 SQL 日志
+  validate-schema: true  # 启动时校验表结构
+  tenant:
+    enabled: false       # 多租户隔离开关（默认关闭，按需开启）
+    column: tenant_id    # 租户字段列名（可自定义，如 org_id）
 ```
 
 ### 定义实体类
@@ -269,6 +281,77 @@ public class UserService extends BaseServiceImpl<User> {
 
 > **注意：** 若某张表未配置 `@MyTable` 逻辑删除字段，框架不会对该表追加任何条件，行为与普通查询完全一致。
 
+### 多租户隔离（可选）
+
+> 默认**关闭**，需显式配置 `myjpa.tenant.enabled=true` 开启。
+
+#### 工作原理
+
+1. **启动时**：框架扫描数据库表结构，自动发现含有配置列名（默认 `tenant_id`）的表，无需修改任何实体类或注解。
+2. **查询时**：自动追加 `AND table.tenant_id = :tenantId` 条件，JOIN 策略与逻辑删除一致（LEFT JOIN 加到 ON，其余加到 WHERE）。
+3. **超管**：`getTenantId()` 返回 `null` 时不注入任何条件，实现超级管理员查全量数据。
+
+#### 快速接入
+
+**第一步：开启配置**
+
+```yaml
+myjpa:
+  tenant:
+    enabled: true
+    column: tenant_id  # 与数据库实际列名一致
+```
+
+**第二步：实现 `TenantIdProvider` 接口**（只需一个 `@Bean`）
+
+```java
+@Bean
+public TenantIdProvider tenantIdProvider() {
+    // 从当前登录上下文获取租户ID，null 表示超管
+    return () -> SecurityContextHolder.getContext().getTenantId();
+}
+```
+
+> 若不使用 Spring Security，也可通过 `TenantContext.setTenantId(id)` 在拦截器中手动设置（ThreadLocal 方式，作为 SPI 的备选）。
+
+#### SQL 自动改写示例
+
+```sql
+-- 原始 SQL
+SELECT * FROM user WHERE age > 18
+
+-- 自动转换为（tenantId = 5）
+SELECT * FROM user WHERE age > 18 AND user.tenant_id = 5
+
+-- JOIN 查询（user 和 order 都有 tenant_id）
+SELECT u.id, o.amount FROM user u LEFT JOIN `order` o ON u.id = o.user_id
+
+-- 自动转换为
+SELECT u.id, o.amount
+FROM user u
+LEFT JOIN `order` o ON u.id = o.user_id AND o.tenant_id = 5
+WHERE u.tenant_id = 5
+```
+
+#### 临时跳过租户条件
+
+```java
+// 方式一：Lambda 形式（推荐，自动恢复）
+List<User> allUsers = TenantContext.withoutTenant(
+    () -> queryListForSql("SELECT * FROM user", null, User.class)
+);
+
+// 方式二：手动控制
+TenantContext.skip();
+try {
+    return queryListForSql("SELECT * FROM user", null, User.class);
+} finally {
+    TenantContext.restore();
+}
+```
+
+> **注意：** 若某张表在数据库中不存在 `tenant_id` 列，框架自动跳过该表，不会注入任何条件。
+
 ### 参数绑定说明
 
 **重要：** 本框架使用 **命名参数** 而非 JDBC 的 `?` 占位符。
@@ -333,10 +416,12 @@ JdbcTemplate (数据访问)
 
 ### 核心组件
 
-- **TableCacheManager** - 缓存 `@MyTable` 注解信息
-- **JSqlDynamicSqlParser** - 基于 JSqlParser 的 SQL 解析和改写
+- **TableCacheManager** - 缓存 `@MyTable` 注解信息及租户表集合
+- **JSqlDynamicSqlParser** - 基于 JSqlParser 的 SQL 解析和改写（逻辑删除 + 租户隔离）
 - **SqlBuilder** - 多数据库 SQL 方言生成器
-- **DatabaseSchemaValidator** - 数据库表结构校验
+- **DatabaseSchemaValidator** - 启动时校验表结构，同步扫描并注册租户表
+- **TenantIdProvider** - 租户 ID 获取 SPI 接口
+- **TenantContext** - ThreadLocal 工具类，支持编程式设置租户 ID 及临时跳过
 
 ## 🔨 开发命令
 

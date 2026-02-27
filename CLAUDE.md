@@ -29,7 +29,8 @@ JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home mvn cle
 - **DAO Layer**: `IBaseDao` + `BaseDaoImpl` handle data access via Spring JDBC Template
 - **SQL Generation**: `SqlBuilder` with database-specific implementations (MySQL, Oracle, SQL Server, PostgreSQL, KingbaseES)
 - **Metadata Management**: `TableInfoBuilder` scans `@MyTable` annotations at startup
-- **SQL Parser**: `JSqlDynamicSqlParser` automatically injects logical delete conditions into all SELECT queries
+- **SQL Parser**: `JSqlDynamicSqlParser` automatically injects logical delete conditions and tenant isolation conditions into all SELECT queries
+- **Multi-Tenancy**: `TenantIdProvider` (SPI), `TenantContext` (ThreadLocal), `TenantAwareSqlParameterSource` (parameter injection)
 
 ### Key Annotations
 - `@MyTable`: Maps entity classes to database tables with optional logical deletion support
@@ -67,6 +68,38 @@ SELECT u.*, r.role_name FROM user u LEFT JOIN role r ON u.role_id = r.id AND r.i
 WHERE u.delete_flag = 0
 ```
 
+### Multi-Tenancy Isolation
+
+**Disabled by default.** Enable via `myjpa.tenant.enabled=true`.
+
+**How it works:**
+1. At startup, `DatabaseSchemaValidator` checks every `@MyTable` table for the configured tenant column (default `tenant_id`) and registers matching tables in `TableCacheManager.TABLE_TENANT_CACHE`.
+2. At query time, `BaseDaoImpl.applyTenant()` calls `JSqlDynamicSqlParser.appendTenantCondition()` which rewrites the SQL to inject `AND table.tenant_id = :myjpaTenantId`.
+3. `TenantAwareSqlParameterSource` wraps the original parameter source to supply the actual tenant ID value.
+
+**Priority for obtaining tenant ID:** `TenantIdProvider` SPI Bean → `TenantContext.getTenantId()` ThreadLocal → `null` (skip injection = super-admin).
+
+**`applyTenant()` skips injection when:**
+- `myjpa.tenant.enabled=false`
+- `TenantContext.isSkipped()` returns true
+- `getCurrentTenantId()` returns null (super-admin)
+
+**JOIN strategy** (same as logical delete):
+- Main table (FROM) and INNER JOIN → condition added to WHERE clause
+- LEFT/RIGHT JOIN → condition added to JOIN ON clause (preserves outer join semantics)
+
+**Idempotency:** `isTenantConditionExists` checks before appending, so conditions are never duplicated.
+
+**Method-level bypass:**
+```java
+// Lambda form (recommended)
+TenantContext.withoutTenant(() -> dao.queryListForSql(...));
+
+// Manual
+TenantContext.skip();
+try { ... } finally { TenantContext.restore(); }
+```
+
 ### Logging Configuration
 - Uses Log4j2 instead of Spring Boot's default Logback
 - SQL logging controlled by `myjpa.showsql` property
@@ -91,10 +124,23 @@ Heavy use of reflection for:
 - Log4j2 for logging
 
 ## Testing Notes
-Currently no unit tests exist. When adding tests, use Spring Boot testing conventions with `src/test/java` structure.
+Tests live in `src/test/java`. No Spring context is required — tests set static fields directly:
+```java
+@BeforeAll static void setup() {
+    SqlBuilder.type = 1; // 1=MySQL, 5=PostgreSQL
+    TableCacheManager.initCache("io.github.mocanjie.base.myjpa.test.entity");
+    // For tenant tests:
+    JSqlDynamicSqlParser.tenantEnabled = true;
+    TableCacheManager.registerTenantTable("user");
+}
+```
+Current test classes: `MySQL8CompatibilityTest` (24), `PostgreSQL16CompatibilityTest` (24), `TenantIsolationTest` (23) — 71 tests total.
 
 ## Configuration Properties
-- `myjpa.showsql`: Enable/disable SQL statement logging
+- `myjpa.showsql`: Enable/disable SQL statement logging (default `true`)
+- `myjpa.validate-schema`: Enable/disable schema validation at startup (default `true`)
+- `myjpa.tenant.enabled`: Enable multi-tenancy isolation (default **`false`**)
+- `myjpa.tenant.column`: Tenant column name (default `tenant_id`)
 
 ## Intelligent Package Scanning
 The starter automatically detects and scans the main application package for @MyTable annotations:
