@@ -41,31 +41,50 @@ Multi-database support implemented through `SqlBuilder` variants. Database type 
 
 ## Important Implementation Details
 
+### SQL Condition Injection Pipeline
+
+All query methods route through `BaseDaoImpl.applyConditions()`, which decides the parse path once per query:
+
+```
+applyConditions(sql, sps)
+  ├─ tenant enabled + !isSkipped() + tenantId != null
+  │    → appendConditions(sql)          // 1 parse: delete + tenant together
+  └─ otherwise
+       → appendDeleteCondition(sql)     // 1 parse: delete only
+```
+
+Either path performs **exactly one** `CCJSqlParserUtil.parse()` call per query, regardless of whether both features are active.
+
 ### Automatic Logical Delete Condition Injection
-All query methods (`queryListForSql`, `querySingleForSql`, `queryPageForSql`, `queryById`, `querySingleByField`) automatically inject logical delete conditions via `JSqlDynamicSqlParser.appendDeleteCondition()`. There are no separate `WithDeleteCondition` methods — the standard methods handle everything.
 
-The parser is idempotent: it checks `isDeleteConditionExists` before appending, so conditions are never duplicated even when methods delegate to each other internally.
+All query methods automatically inject logical delete conditions. There are no separate `WithDeleteCondition` methods — the standard methods handle everything.
 
-### JOIN Condition Optimization
-- **Main table (FROM)**: Delete conditions added to WHERE clause
-- **LEFT/RIGHT JOIN**: Delete conditions added to JOIN ON clause (preserves outer join semantics)
-- **INNER JOIN**: Delete conditions added to WHERE clause (better performance)
+The parser is idempotent: `isDeleteConditionExists` checks before appending, so conditions are never duplicated even when methods delegate to each other internally.
 
-Tables without a configured `@MyTable` delete field are left untouched.
+### JOIN Condition Strategy
+Both logical delete and tenant conditions follow the same placement rule:
+- **Main table (FROM) and INNER JOIN**: conditions added to WHERE clause
+- **LEFT/RIGHT JOIN**: conditions added to JOIN ON clause (preserves outer join semantics)
+
+Tables without a configured `@MyTable` delete field (or without a tenant column in the database) are left untouched.
 
 ### SQL Transformation Examples
 ```sql
 -- Original
 SELECT * FROM user
 
--- Auto-transformed
+-- After appendDeleteCondition (delete only)
 SELECT * FROM user WHERE user.delete_flag = 0
 
--- JOIN queries
+-- After appendConditions (delete + tenant, single parse)
+SELECT * FROM user WHERE user.delete_flag = 0 AND user.tenant_id = :myjpaTenantId
+
+-- JOIN query with both features
 SELECT u.*, r.role_name FROM user u LEFT JOIN role r ON u.role_id = r.id
--- Becomes
-SELECT u.*, r.role_name FROM user u LEFT JOIN role r ON u.role_id = r.id AND r.is_deleted = 0
-WHERE u.delete_flag = 0
+-- Becomes (user has tenant_id, role has is_deleted)
+SELECT u.*, r.role_name FROM user u
+LEFT JOIN role r ON u.role_id = r.id AND r.is_deleted = 0
+WHERE u.delete_flag = 0 AND u.tenant_id = :myjpaTenantId
 ```
 
 ### Multi-Tenancy Isolation
@@ -74,15 +93,16 @@ WHERE u.delete_flag = 0
 
 **How it works:**
 1. At startup, `DatabaseSchemaValidator` checks every `@MyTable` table for the configured tenant column (default `tenant_id`) and registers matching tables in `TableCacheManager.TABLE_TENANT_CACHE`.
-2. At query time, `BaseDaoImpl.applyTenant()` calls `JSqlDynamicSqlParser.appendTenantCondition()` which rewrites the SQL to inject `AND table.tenant_id = :myjpaTenantId`.
-3. `TenantAwareSqlParameterSource` wraps the original parameter source to supply the actual tenant ID value.
+2. At query time, `BaseDaoImpl.applyConditions()` decides whether to call `appendConditions()` (both delete + tenant, single parse) or `appendDeleteCondition()` (delete only, single parse).
+3. When tenant is active, `JSqlDynamicSqlParser.appendConditions()` injects `AND table.tenant_id = :myjpaTenantId` in the same parse pass as the logical delete condition.
+4. `TenantAwareSqlParameterSource` wraps the original parameter source to supply the actual tenant ID value.
 
 **Priority for obtaining tenant ID:** `TenantIdProvider` SPI Bean → `TenantContext.getTenantId()` ThreadLocal → `null` (skip injection = super-admin).
 
-**`applyTenant()` skips injection when:**
+**`applyConditions()` uses delete-only path when:**
 - `myjpa.tenant.enabled=false`
 - `TenantContext.isSkipped()` returns true
-- `getCurrentTenantId()` returns null (super-admin)
+- `getCurrentTenantId()` returns null (super-admin — SQL is never rewritten for tenant, avoiding missing-parameter errors)
 
 **JOIN strategy** (same as logical delete):
 - Main table (FROM) and INNER JOIN → condition added to WHERE clause
@@ -134,7 +154,7 @@ Tests live in `src/test/java`. No Spring context is required — tests set stati
     TableCacheManager.registerTenantTable("user");
 }
 ```
-Current test classes: `MySQL8CompatibilityTest` (24), `PostgreSQL16CompatibilityTest` (24), `TenantIsolationTest` (23) — 71 tests total.
+Current test classes: `MySQL8CompatibilityTest` (24), `PostgreSQL16CompatibilityTest` (24), `TenantIsolationTest` (28) — 76 tests total.
 
 ## Configuration Properties
 - `myjpa.showsql`: Enable/disable SQL statement logging (default `true`)
