@@ -4,6 +4,7 @@ import io.github.mocanjie.base.mycommon.exception.BusinessException;
 import io.github.mocanjie.base.mycommon.pager.Pager;
 import io.github.mocanjie.base.myjpa.builder.SqlBuilder;
 import io.github.mocanjie.base.myjpa.builder.TableInfoBuilder;
+import io.github.mocanjie.base.myjpa.cache.TableCacheManager;
 import io.github.mocanjie.base.myjpa.dao.IBaseDao;
 import io.github.mocanjie.base.myjpa.metadata.TableInfo;
 import io.github.mocanjie.base.myjpa.parser.JSqlDynamicSqlParser;
@@ -28,6 +29,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.io.Serializable;
+import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -99,6 +101,54 @@ public class BaseDaoImpl implements IBaseDao {
 		} else {
 			// 单次解析：只注入删除条件
 			return new ConditionResult(JSqlDynamicSqlParser.appendDeleteCondition(sql), sps);
+		}
+	}
+
+	// ===================== 写操作租户 helper =====================
+
+	/**
+	 * 获取写操作所需的租户 ID。
+	 * 返回 null 表示不需要注入（全局关闭 / 跳过 / 超管 / 表无租户列）。
+	 */
+	private Object getWriteTenantId(String tableName) {
+		if (!JSqlDynamicSqlParser.tenantEnabled || TenantContext.isSkipped()) return null;
+		if (!TableCacheManager.hasTenantColumn(tableName)) return null;
+		return getCurrentTenantId();
+	}
+
+	/**
+	 * 为 UPDATE / 逻辑DELETE SQL 的 WHERE 子句追加租户条件。
+	 * UPDATE table SET ... WHERE pk=:pk  →  ... WHERE pk=:pk AND tenant_id=:myjpaTenantId
+	 */
+	private ConditionResult applyWriteConditions(String sql, SqlParameterSource sps, String tableName) {
+		Object tenantId = getWriteTenantId(tableName);
+		if (tenantId == null) return new ConditionResult(sql, sps);
+		String processedSql = sql + " AND " + JSqlDynamicSqlParser.tenantColumn
+				+ " = :" + JSqlDynamicSqlParser.TENANT_PARAM_NAME;
+		return new ConditionResult(processedSql,
+				new TenantAwareSqlParameterSource(sps, JSqlDynamicSqlParser.TENANT_PARAM_NAME, tenantId));
+	}
+
+	/** 在类继承链中查找字段（支持父类）。 */
+	private static Field findFieldInHierarchy(Class<?> clazz, String fieldName) {
+		for (Class<?> c = clazz; c != null && c != Object.class; c = c.getSuperclass()) {
+			try { return c.getDeclaredField(fieldName); } catch (NoSuchFieldException ignored) {}
+		}
+		return null;
+	}
+
+	/** 通过反射将租户 ID 写入 PO 字段（仅当字段当前为 null 时才写入，自动做类型适配）。 */
+	private <PO> void setTenantField(Field field, PO po, Object tenantId) {
+		try {
+			if (field.get(po) != null) return;
+			Class<?> ft = field.getType();
+			Object val = tenantId;
+			if (ft == Long.class || ft == long.class)        val = Long.parseLong(tenantId.toString());
+			else if (ft == Integer.class || ft == int.class) val = Integer.parseInt(tenantId.toString());
+			else if (ft == String.class)                     val = tenantId.toString();
+			field.set(po, val);
+		} catch (Exception e) {
+			log.warn("自动填充租户字段 {} 失败: {}", field.getName(), e.getMessage());
 		}
 	}
 
@@ -193,19 +243,29 @@ public class BaseDaoImpl implements IBaseDao {
 	public <PO> Serializable insertPO(PO po, boolean autoCreateId) {
 		try {
 			TableInfo tableInfo = TableInfoBuilder.getTableInfo(po.getClass());
+			if (autoCreateId) tableInfo.setPkValue(po);
+
+			String sql = SqlParser.getInsertSql(tableInfo, po);
 			SqlParameterSource paramSource = new BeanPropertySqlParameterSource(po);
+
+			// 租户处理：SQL 未含租户列（ignoreNull=true 时字段为 null 被跳过）→ 追加列+参数
+			Object tenantId = getWriteTenantId(tableInfo.getTableName());
+			if (tenantId != null && !sql.toLowerCase().contains(JSqlDynamicSqlParser.tenantColumn.toLowerCase())) {
+				sql = JSqlDynamicSqlParser.appendTenantToInsertSql(sql);
+				paramSource = new TenantAwareSqlParameterSource(paramSource, JSqlDynamicSqlParser.TENANT_PARAM_NAME, tenantId);
+			}
+
 			if (autoCreateId) {
-				tableInfo.setPkValue(po);
-				namedParameterJdbcTemplate.update(SqlParser.getInsertSql(tableInfo, po), paramSource);
+				namedParameterJdbcTemplate.update(sql, paramSource);
 				return (Serializable) tableInfo.getPkValue(po);
 			} else {
 				Object pkValue = tableInfo.getPkValue(po);
 				if (pkValue != null) {
-					namedParameterJdbcTemplate.update(SqlParser.getInsertSql(tableInfo, po), paramSource);
+					namedParameterJdbcTemplate.update(sql, paramSource);
 					return (Serializable) pkValue;
 				}
 				KeyHolder holder = new GeneratedKeyHolder();
-				namedParameterJdbcTemplate.update(SqlParser.getInsertSql(tableInfo, po), paramSource, holder);
+				namedParameterJdbcTemplate.update(sql, paramSource, holder);
 				long id = holder.getKey().longValue();
 				tableInfo.setPkValue(po, id);
 				return id;
@@ -236,9 +296,11 @@ public class BaseDaoImpl implements IBaseDao {
 	}
 
 	private <PO> int updatePO(PO po, boolean ignoreNull, @Nullable String... forceUpdateFields) {
-		String sql = SqlParser.getUpdateSql(TableInfoBuilder.getTableInfo(po.getClass()), po, ignoreNull, forceUpdateFields);
+		TableInfo tableInfo = TableInfoBuilder.getTableInfo(po.getClass());
+		String sql = SqlParser.getUpdateSql(tableInfo, po, ignoreNull, forceUpdateFields);
 		SqlParameterSource paramSource = new BeanPropertySqlParameterSource(po);
-		return namedParameterJdbcTemplate.update(sql, paramSource);
+		var r = applyWriteConditions(sql, paramSource, tableInfo.getTableName());
+		return namedParameterJdbcTemplate.update(r.sql(), r.sps());
 	}
 
 	@Override
@@ -246,7 +308,9 @@ public class BaseDaoImpl implements IBaseDao {
 		try {
 			TableInfo tableInfo = TableInfoBuilder.getTableInfo(po.getClass());
 			String sql = SqlParser.getDelByIdSql(tableInfo);
-			return this.getJdbcTemplate().update(sql, tableInfo.getPkValue(po));
+			MapSqlParameterSource sps = new MapSqlParameterSource(tableInfo.getPkFieldName(), tableInfo.getPkValue(po));
+			var r = applyWriteConditions(sql, sps, tableInfo.getTableName());
+			return namedParameterJdbcTemplate.update(r.sql(), r.sps());
 		} catch (Exception e) {
 			throw new BusinessException("delPO error!");
 		}
@@ -255,15 +319,29 @@ public class BaseDaoImpl implements IBaseDao {
 	@Override
 	public <PO> int delByIds(Class<PO> clazz, Object... id) {
 		try {
-			List<Map<String, Object>> beanList = new ArrayList<>();
 			TableInfo tableInfo = TableInfoBuilder.getTableInfo(clazz);
-			for (Object o : id) {
-				Map<String, Object> map = new HashMap<>();
-				map.put(tableInfo.getPkFieldName(), o);
-				beanList.add(map);
-			}
 			String sql = SqlParser.getDelByIdsSql(tableInfo);
-			SqlParameterSource[] params = SqlParameterSourceUtils.createBatch(beanList);
+			Object tenantId = getWriteTenantId(tableInfo.getTableName());
+			SqlParameterSource[] params;
+			if (tenantId != null) {
+				sql = sql + " AND " + JSqlDynamicSqlParser.tenantColumn
+						+ " = :" + JSqlDynamicSqlParser.TENANT_PARAM_NAME;
+				List<SqlParameterSource> spsList = new ArrayList<>(id.length);
+				for (Object o : id) {
+					spsList.add(new TenantAwareSqlParameterSource(
+							new MapSqlParameterSource(tableInfo.getPkFieldName(), o),
+							JSqlDynamicSqlParser.TENANT_PARAM_NAME, tenantId));
+				}
+				params = spsList.toArray(new SqlParameterSource[0]);
+			} else {
+				List<Map<String, Object>> beanList = new ArrayList<>(id.length);
+				for (Object o : id) {
+					Map<String, Object> map = new HashMap<>();
+					map.put(tableInfo.getPkFieldName(), o);
+					beanList.add(map);
+				}
+				params = SqlParameterSourceUtils.createBatch(beanList);
+			}
 			return namedParameterJdbcTemplate.batchUpdate(sql, params).length;
 		} catch (Exception e) {
 			throw new BusinessException("del error!");
@@ -274,17 +352,43 @@ public class BaseDaoImpl implements IBaseDao {
 	public <PO> Serializable batchInsertPO(List<PO> pos, boolean autoCreateId) {
 		if (pos == null || pos.isEmpty()) return 0;
 		try {
-			List<PO> beanList = new ArrayList<>();
 			TableInfo tableInfo = TableInfoBuilder.getTableInfo(pos.get(0).getClass());
-			String sql = SqlParser.getInsertSql(tableInfo, pos.get(0), false);
-			for (PO po : pos) {
-				if (autoCreateId) {
-					TableInfo tif = TableInfoBuilder.getTableInfo(po.getClass());
-					tif.setPkValue(po);
-				}
-				beanList.add(po);
+			if (autoCreateId) {
+				for (PO po : pos) TableInfoBuilder.getTableInfo(po.getClass()).setPkValue(po);
 			}
-			SqlParameterSource[] params = SqlParameterSourceUtils.createBatch(beanList);
+
+			// ignoreNull=false：保证批次内所有行 schema 一致
+			String sql = SqlParser.getInsertSql(tableInfo, pos.get(0), false);
+			Object tenantId = getWriteTenantId(tableInfo.getTableName());
+			SqlParameterSource[] params;
+
+			if (tenantId != null) {
+				boolean sqlHasTenantCol = sql.toLowerCase().contains(JSqlDynamicSqlParser.tenantColumn.toLowerCase());
+				if (sqlHasTenantCol) {
+					// POJO 有租户字段（ignoreNull=false 包含了它）→ 反射批量赋值（字段为 null 时赋值）
+					String tenantFieldName = io.github.mocanjie.base.myjpa.utils.CommonUtils
+							.underscoreToCamelCase(JSqlDynamicSqlParser.tenantColumn);
+					Field tenantField = findFieldInHierarchy(pos.get(0).getClass(), tenantFieldName);
+					if (tenantField != null) {
+						tenantField.setAccessible(true);
+						for (PO po : pos) setTenantField(tenantField, po, tenantId);
+					}
+					params = SqlParameterSourceUtils.createBatch(pos);
+				} else {
+					// POJO 没有租户字段 → SQL 追加列，每个元素包装 TenantAwareSqlParameterSource
+					sql = JSqlDynamicSqlParser.appendTenantToInsertSql(sql);
+					final Object tid = tenantId;
+					List<SqlParameterSource> spsList = new ArrayList<>(pos.size());
+					for (PO po : pos) {
+						spsList.add(new TenantAwareSqlParameterSource(
+								new BeanPropertySqlParameterSource(po), JSqlDynamicSqlParser.TENANT_PARAM_NAME, tid));
+					}
+					params = spsList.toArray(new SqlParameterSource[0]);
+				}
+			} else {
+				params = SqlParameterSourceUtils.createBatch(pos);
+			}
+
 			namedParameterJdbcTemplate.batchUpdate(sql, params);
 		} catch (Exception e) {
 			log.error("批量新增异常", e);

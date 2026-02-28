@@ -121,15 +121,19 @@ public class SqlParser {
         TableCacheManager.DeleteInfo deleteInfo = TableCacheManager.getDeleteInfoByClassName(tableInfo.getClazz().getName());
         if (deleteInfo != null && deleteInfo.isValid() &&
             StringUtils.isNotBlank(deleteInfo.getDelColumn())) {
-            // 逻辑删除：UPDATE table SET delete_flag = 1 WHERE id = ?
-            return String.format("UPDATE %s SET %s = %s WHERE %s = ?",
+            // 逻辑删除：UPDATE table SET delete_flag = 1 WHERE id = :pkField
+            return String.format("UPDATE %s SET %s = %s WHERE %s = :%s",
                     tableInfo.getTableName(),
                     deleteInfo.getDelColumn(),
                     deleteInfo.getDelValue(),
-                    tableInfo.getPkColumnName());
+                    tableInfo.getPkColumnName(),
+                    tableInfo.getPkFieldName());
         } else {
-            // 物理删除：DELETE FROM table WHERE id = ?
-            return String.format(DEL_BYID_SQL, tableInfo.getTableName(), tableInfo.getPkColumnName());
+            // 物理删除：DELETE FROM table WHERE id = :pkField
+            return String.format("DELETE FROM %s WHERE %s = :%s",
+                    tableInfo.getTableName(),
+                    tableInfo.getPkColumnName(),
+                    tableInfo.getPkFieldName());
         }
     }
 

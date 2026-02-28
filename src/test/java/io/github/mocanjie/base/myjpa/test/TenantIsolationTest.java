@@ -488,6 +488,67 @@ class TenantIsolationTest {
     }
 
     // =========================================================
+    // 12. INSERT SQL 租户列追加（appendTenantToInsertSql）
+    // =========================================================
+
+    @Test
+    @Order(29)
+    @DisplayName("12.1 INSERT SQL 未含租户列时自动追加列和占位符")
+    void test29_insertSqlTenantAppended() {
+        String sql = "INSERT INTO user(name, email) VALUES (:name, :email)";
+        String result = JSqlDynamicSqlParser.appendTenantToInsertSql(sql);
+        assertEquals("INSERT INTO user(name, email, tenant_id) VALUES (:name, :email, :myjpaTenantId)",
+                result, "应在列列表和值列表末尾追加 tenant_id / :myjpaTenantId");
+    }
+
+    @Test
+    @Order(30)
+    @DisplayName("12.2 INSERT SQL 已含租户列时幂等，不重复追加")
+    void test30_insertSqlIdempotent() {
+        String sql = "INSERT INTO user(name, tenant_id) VALUES (:name, :tenantId)";
+        String result = JSqlDynamicSqlParser.appendTenantToInsertSql(sql);
+        assertEquals(sql, result, "已含租户列时 SQL 不应被修改");
+        assertEquals(1, countOccurrences(result.toLowerCase(), "tenant_id"),
+                "tenant_id 应只出现一次");
+    }
+
+    @Test
+    @Order(31)
+    @DisplayName("12.3 tenantEnabled=false 时 appendTenantToInsertSql 不修改 SQL")
+    void test31_insertSqlDisabledSkips() {
+        JSqlDynamicSqlParser.tenantEnabled = false;
+        String sql = "INSERT INTO user(name) VALUES (:name)";
+        String result = JSqlDynamicSqlParser.appendTenantToInsertSql(sql);
+        assertEquals(sql, result, "全局关闭时 SQL 不应被修改");
+    }
+
+    @Test
+    @Order(32)
+    @DisplayName("12.4 自定义租户列名（org_id）时 INSERT SQL 追加正确的列名")
+    void test32_insertSqlCustomColumn() {
+        JSqlDynamicSqlParser.tenantColumn = "org_id";
+        try {
+            String sql = "INSERT INTO user(name) VALUES (:name)";
+            String result = JSqlDynamicSqlParser.appendTenantToInsertSql(sql);
+            assertTrue(result.contains("org_id"), "应追加自定义列名 org_id");
+            assertFalse(result.contains("tenant_id"), "不应出现默认列名 tenant_id");
+            assertTrue(result.contains(":myjpaTenantId"), "占位符应为 :myjpaTenantId");
+        } finally {
+            JSqlDynamicSqlParser.tenantColumn = "tenant_id";
+        }
+    }
+
+    @Test
+    @Order(33)
+    @DisplayName("12.5 INSERT SQL 单字段极简情况正确追加")
+    void test33_insertSqlSingleField() {
+        String sql = "INSERT INTO user(name) VALUES (:name)";
+        String result = JSqlDynamicSqlParser.appendTenantToInsertSql(sql);
+        assertEquals("INSERT INTO user(name, tenant_id) VALUES (:name, :myjpaTenantId)",
+                result, "单字段 INSERT 也应正确追加");
+    }
+
+    // =========================================================
     // 辅助方法
     // =========================================================
 

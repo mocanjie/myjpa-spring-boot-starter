@@ -38,7 +38,34 @@ public class JSqlDynamicSqlParser {
 
     /** 租户参数名（SQL 占位符名称），内部固定，不对外暴露 */
     public static final String TENANT_PARAM_NAME = "myjpaTenantId";
-    
+
+    /**
+     * 为 INSERT SQL 追加租户列和值占位符（幂等：已含租户列时直接返回原 SQL）。
+     *
+     * <pre>
+     * INSERT INTO user(name, email) VALUES (:name, :email)
+     * → INSERT INTO user(name, email, tenant_id) VALUES (:name, :email, :myjpaTenantId)
+     * </pre>
+     *
+     * <p>注意：此方法不检查表名注册，由调用方（{@code BaseDaoImpl}）负责判断表是否有租户字段。
+     *
+     * @param sql 原始 INSERT SQL
+     * @return 追加租户列后的 SQL；全局关闭、已含租户列或格式无法识别时返回原 SQL
+     */
+    public static String appendTenantToInsertSql(String sql) {
+        if (!tenantEnabled || sql == null || sql.isBlank()) return sql;
+        if (sql.toLowerCase().contains(tenantColumn.toLowerCase())) return sql;
+        String upperSql = sql.toUpperCase();
+        int closeParen = upperSql.indexOf(") VALUES");
+        if (closeParen == -1) return sql;
+        int lastClose = sql.lastIndexOf(")");
+        if (lastClose <= closeParen) return sql;
+        return sql.substring(0, closeParen)
+                + ", " + tenantColumn + ")"
+                + sql.substring(closeParen + 1, lastClose)
+                + ", :" + TENANT_PARAM_NAME + ")";
+    }
+
     /**
      * 为SQL自动拼接逻辑删除条件
      *
