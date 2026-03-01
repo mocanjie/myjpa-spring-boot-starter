@@ -40,6 +40,17 @@ public class BaseDaoImpl implements IBaseDao {
 
 	protected static Logger log = LoggerFactory.getLogger(BaseDaoImpl.class);
 
+	/** 是否打印 SQL 执行时间，由 MyJpaAutoConfiguration 根据 myjpa.show-sql-time 配置同步 */
+	public static volatile boolean showSqlTime = false;
+
+	private <T> T executeWithTiming(String sql, java.util.function.Supplier<T> operation) {
+		if (!showSqlTime) return operation.get();
+		long start = System.currentTimeMillis();
+		T result = operation.get();
+		log.info("[MyJPA] {}ms ← {}", System.currentTimeMillis() - start, sql);
+		return result;
+	}
+
 	public boolean isWrapClass(Class<?> clz) {
 		return BeanUtils.isSimpleValueType(clz) || clz == java.sql.Date.class;
 	}
@@ -158,7 +169,7 @@ public class BaseDaoImpl implements IBaseDao {
 				? new EmptySqlParameterSource()
 				: new BeanPropertySqlParameterSource(param);
 		var r = applyConditions(sql, sps);
-		return namedParameterJdbcTemplate.query(r.sql(), r.sps(), getRowMapper(clazz));
+		return executeWithTiming(r.sql(), () -> namedParameterJdbcTemplate.query(r.sql(), r.sps(), getRowMapper(clazz)));
 	}
 
 	@Override
@@ -167,7 +178,7 @@ public class BaseDaoImpl implements IBaseDao {
 				? new EmptySqlParameterSource()
 				: new MapSqlParameterSource(param);
 		var r = applyConditions(sql, sps);
-		return namedParameterJdbcTemplate.query(r.sql(), r.sps(), getRowMapper(clazz));
+		return executeWithTiming(r.sql(), () -> namedParameterJdbcTemplate.query(r.sql(), r.sps(), getRowMapper(clazz)));
 	}
 
 	@Override
@@ -190,14 +201,16 @@ public class BaseDaoImpl implements IBaseDao {
 		var r = applyConditions(sql, sps);
 		if (!pager.getIgnoreCount()) {
 			String countSql = "select count(*) from ( " + r.sql() + " ) mkt_page_count";
-			pager.setTotalRows(namedParameterJdbcTemplate.queryForObject(countSql, r.sps(), new SingleColumnRowMapper<>(Long.class)));
+			pager.setTotalRows(executeWithTiming(countSql, () -> namedParameterJdbcTemplate.queryForObject(countSql, r.sps(), new SingleColumnRowMapper<>(Long.class))));
 			if (pager.getTotalRows() > 0) {
-				pager.setPageData(namedParameterJdbcTemplate.query(SqlBuilder.buildPagerSql(r.sql(), pager), r.sps(), getRowMapper(clazz)));
+				String pageSql = SqlBuilder.buildPagerSql(r.sql(), pager);
+				pager.setPageData(executeWithTiming(pageSql, () -> namedParameterJdbcTemplate.query(pageSql, r.sps(), getRowMapper(clazz))));
 			} else {
 				pager.setPageData(new ArrayList<>());
 			}
 		} else {
-			pager.setPageData(namedParameterJdbcTemplate.query(SqlBuilder.buildPagerSql(r.sql(), pager), r.sps(), getRowMapper(clazz)));
+			String pageSql = SqlBuilder.buildPagerSql(r.sql(), pager);
+			pager.setPageData(executeWithTiming(pageSql, () -> namedParameterJdbcTemplate.query(pageSql, r.sps(), getRowMapper(clazz))));
 		}
 		return pager;
 	}
@@ -210,14 +223,16 @@ public class BaseDaoImpl implements IBaseDao {
 		var r = applyConditions(sql, sps);
 		if (!pager.getIgnoreCount()) {
 			String countSql = "select count(*) from ( " + r.sql() + " ) mkt_page_count";
-			pager.setTotalRows(namedParameterJdbcTemplate.queryForObject(countSql, r.sps(), new SingleColumnRowMapper<>(Long.class)));
+			pager.setTotalRows(executeWithTiming(countSql, () -> namedParameterJdbcTemplate.queryForObject(countSql, r.sps(), new SingleColumnRowMapper<>(Long.class))));
 			if (pager.getTotalRows() > 0) {
-				pager.setPageData(namedParameterJdbcTemplate.query(SqlBuilder.buildPagerSql(r.sql(), pager), r.sps(), getRowMapper(clazz)));
+				String pageSql = SqlBuilder.buildPagerSql(r.sql(), pager);
+				pager.setPageData(executeWithTiming(pageSql, () -> namedParameterJdbcTemplate.query(pageSql, r.sps(), getRowMapper(clazz))));
 			} else {
 				pager.setPageData(new ArrayList<>());
 			}
 		} else {
-			pager.setPageData(namedParameterJdbcTemplate.query(SqlBuilder.buildPagerSql(r.sql(), pager), r.sps(), getRowMapper(clazz)));
+			String pageSql = SqlBuilder.buildPagerSql(r.sql(), pager);
+			pager.setPageData(executeWithTiming(pageSql, () -> namedParameterJdbcTemplate.query(pageSql, r.sps(), getRowMapper(clazz))));
 		}
 		return pager;
 	}
@@ -255,17 +270,19 @@ public class BaseDaoImpl implements IBaseDao {
 				paramSource = new TenantAwareSqlParameterSource(paramSource, JSqlDynamicSqlParser.TENANT_PARAM_NAME, tenantId);
 			}
 
+			final String fSql = sql;
+			final SqlParameterSource fPs = paramSource;
 			if (autoCreateId) {
-				namedParameterJdbcTemplate.update(sql, paramSource);
+				executeWithTiming(fSql, () -> namedParameterJdbcTemplate.update(fSql, fPs));
 				return (Serializable) tableInfo.getPkValue(po);
 			} else {
 				Object pkValue = tableInfo.getPkValue(po);
 				if (pkValue != null) {
-					namedParameterJdbcTemplate.update(sql, paramSource);
+					executeWithTiming(fSql, () -> namedParameterJdbcTemplate.update(fSql, fPs));
 					return (Serializable) pkValue;
 				}
 				KeyHolder holder = new GeneratedKeyHolder();
-				namedParameterJdbcTemplate.update(sql, paramSource, holder);
+				executeWithTiming(fSql, () -> namedParameterJdbcTemplate.update(fSql, fPs, holder));
 				long id = holder.getKey().longValue();
 				tableInfo.setPkValue(po, id);
 				return id;
@@ -300,7 +317,7 @@ public class BaseDaoImpl implements IBaseDao {
 		String sql = SqlParser.getUpdateSql(tableInfo, po, ignoreNull, forceUpdateFields);
 		SqlParameterSource paramSource = new BeanPropertySqlParameterSource(po);
 		var r = applyWriteConditions(sql, paramSource, tableInfo.getTableName());
-		return namedParameterJdbcTemplate.update(r.sql(), r.sps());
+		return executeWithTiming(r.sql(), () -> namedParameterJdbcTemplate.update(r.sql(), r.sps()));
 	}
 
 	@Override
@@ -310,7 +327,7 @@ public class BaseDaoImpl implements IBaseDao {
 			String sql = SqlParser.getDelByIdSql(tableInfo);
 			MapSqlParameterSource sps = new MapSqlParameterSource(tableInfo.getPkFieldName(), tableInfo.getPkValue(po));
 			var r = applyWriteConditions(sql, sps, tableInfo.getTableName());
-			return namedParameterJdbcTemplate.update(r.sql(), r.sps());
+			return executeWithTiming(r.sql(), () -> namedParameterJdbcTemplate.update(r.sql(), r.sps()));
 		} catch (Exception e) {
 			throw new BusinessException("delPO error!");
 		}
@@ -342,7 +359,9 @@ public class BaseDaoImpl implements IBaseDao {
 				}
 				params = SqlParameterSourceUtils.createBatch(beanList);
 			}
-			return namedParameterJdbcTemplate.batchUpdate(sql, params).length;
+			final String fSql = sql;
+			final SqlParameterSource[] fParams = params;
+			return executeWithTiming(fSql, () -> namedParameterJdbcTemplate.batchUpdate(fSql, fParams)).length;
 		} catch (Exception e) {
 			throw new BusinessException("del error!");
 		}
@@ -389,7 +408,9 @@ public class BaseDaoImpl implements IBaseDao {
 				params = SqlParameterSourceUtils.createBatch(pos);
 			}
 
-			namedParameterJdbcTemplate.batchUpdate(sql, params);
+			final String fSql = sql;
+			final SqlParameterSource[] fParams = params;
+			executeWithTiming(fSql, () -> namedParameterJdbcTemplate.batchUpdate(fSql, fParams));
 		} catch (Exception e) {
 			log.error("批量新增异常", e);
 			throw new BusinessException("系统错误,请联系管理员");

@@ -32,6 +32,9 @@ public class MyJpaAutoConfiguration implements BeanPostProcessor, Ordered {
     @Value("${myjpa.showsql:true}")
     public boolean showSql;
 
+    @Value("${myjpa.show-sql-time:false}")
+    public boolean showSqlTime;
+
     @Value("${myjpa.validate-schema:true}")
     public boolean validateSchema;
 
@@ -88,6 +91,8 @@ public class MyJpaAutoConfiguration implements BeanPostProcessor, Ordered {
         // 将租户配置同步到解析器静态字段
         JSqlDynamicSqlParser.tenantEnabled = tenantEnabled;
         JSqlDynamicSqlParser.tenantColumn = tenantColumn;
+        // 同步 SQL 执行时间打印开关
+        BaseDaoImpl.showSqlTime = showSqlTime;
 
         try {
             // 使用反射来兼容不同的日志实现
