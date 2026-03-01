@@ -92,7 +92,8 @@ spring:
 
 # 可选配置
 myjpa:
-  showsql: true          # 显示 SQL 日志
+  showsql: true          # 显示 SQL 日志（默认 true）
+  show-sql-time: false   # 打印每条 SQL 的实际执行耗时，INFO 级别输出（默认 false）
   validate-schema: true  # 启动时校验表结构
   tenant:
     enabled: false       # 多租户隔离开关（默认关闭，按需开启）
