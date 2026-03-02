@@ -5,6 +5,7 @@ import io.github.mocanjie.base.myjpa.annotation.MyTable;
 import io.github.mocanjie.base.myjpa.cache.TableCacheManager;
 import io.github.mocanjie.base.myjpa.metadata.TableInfo;
 import io.github.mocanjie.base.myjpa.utils.MyReflectionUtils;
+import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.config.BeanDefinition;
 import org.springframework.beans.factory.config.BeanPostProcessor;
@@ -12,7 +13,6 @@ import org.springframework.context.annotation.ClassPathScanningCandidateComponen
 import org.springframework.core.Ordered;
 import org.springframework.core.type.filter.AnnotationTypeFilter;
 
-import jakarta.annotation.PostConstruct;
 import java.lang.reflect.Field;
 import java.util.*;
 

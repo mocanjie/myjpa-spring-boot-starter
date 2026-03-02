@@ -8,7 +8,6 @@ import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.BeanUtils;
 
 import java.beans.PropertyDescriptor;
-import java.lang.reflect.Field;
 import java.util.Arrays;
 import java.util.LinkedList;
 import java.util.stream.Collectors;
@@ -99,16 +98,6 @@ public class SqlParser {
 
     public static String getSelectByIdSql(TableInfo tableInfo){
         return String.format(SELECT_BY_SQL,tableInfo.getTableName(),tableInfo.getPkColumnName(),tableInfo.getPkFieldName());
-    }
-
-    public static String getSelectByFieldSql(TableInfo tableInfo,String fieldName){
-        Field field = tableInfo.getFieldByName(fieldName);
-        String columnName = CommonUtils.camelCaseToUnderscore(fieldName);
-        MyField annotation = field.getAnnotation(MyField.class);
-        if(annotation!=null && StringUtils.isNotBlank(annotation.value())) columnName = annotation.value();
-        if(fieldName.equals(tableInfo.getPkFieldName())) columnName = tableInfo.getPkColumnName();
-        if(fieldName.equals(tableInfo.getDelFieldName())) columnName = tableInfo.getDelColumnName();
-        return String.format(SELECT_BY_SQL,tableInfo.getTableName(),columnName,fieldName);
     }
 
     /**

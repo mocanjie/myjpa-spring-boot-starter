@@ -2,13 +2,13 @@ package io.github.mocanjie.base.myjpa.validation;
 
 import io.github.mocanjie.base.myjpa.cache.TableCacheManager;
 import io.github.mocanjie.base.myjpa.parser.JSqlDynamicSqlParser;
+import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.Ordered;
 import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 
-import jakarta.annotation.PostConstruct;
 import javax.sql.DataSource;
 import java.sql.DatabaseMetaData;
 import java.sql.ResultSet;

@@ -1,6 +1,7 @@
 package io.github.mocanjie.base.myjpa.dao;
 
 import io.github.mocanjie.base.mycommon.pager.Pager;
+import io.github.mocanjie.base.myjpa.MyTableEntity;
 import org.springframework.lang.Nullable;
 
 import java.io.Serializable;
@@ -22,24 +23,22 @@ public interface IBaseDao {
 
 	<T> T querySingleForSql(String sql, Map<String, Object> param, Class<T> clazz);
 
-	<PO> PO querySingleByField(String fieldName, String fieldValue, Class<PO> clazz);
+	<PO extends MyTableEntity> Serializable insertPO(PO po, boolean autoCreateId);
 
-	<PO> Serializable insertPO(PO po, boolean autoCreateId);
+	<PO extends MyTableEntity> Serializable batchInsertPO(List<PO> pos, boolean autoCreateId);
 
-	<PO> Serializable batchInsertPO(List<PO> pos, boolean autoCreateId);
+	<PO extends MyTableEntity> Serializable batchInsertPO(List<PO> pos, boolean autoCreateId, int batchSize);
 
-	<PO> Serializable batchInsertPO(List<PO> pos, boolean autoCreateId, int batchSize);
+	<PO extends MyTableEntity> int updatePO(PO po);
 
-	<PO> int updatePO(PO po);
+	<PO extends MyTableEntity> int updatePO(PO po, boolean ignoreNull);
 
-	<PO> int updatePO(PO po, boolean ignoreNull);
+	<PO extends MyTableEntity> int updatePO(PO po, @Nullable String... forceUpdateProperties);
 
-	<PO> int updatePO(PO po, @Nullable String... forceUpdateProperties);
+	<PO extends MyTableEntity> PO queryById(Object id, Class<PO> clazz);
 
-	<PO> PO queryById(Object id, Class<PO> clazz);
+	<PO extends MyTableEntity> int delPO(PO po);
 
-	<PO> int delPO(PO po);
-
-	<PO> int delByIds(Class<PO> clazz, Object... id);
+	<PO extends MyTableEntity> int delByIds(Class<PO> clazz, Object... id);
 
 }

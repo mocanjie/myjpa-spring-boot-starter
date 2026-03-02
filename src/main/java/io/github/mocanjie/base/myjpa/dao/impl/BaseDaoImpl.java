@@ -2,6 +2,7 @@ package io.github.mocanjie.base.myjpa.dao.impl;
 
 import io.github.mocanjie.base.mycommon.exception.BusinessException;
 import io.github.mocanjie.base.mycommon.pager.Pager;
+import io.github.mocanjie.base.myjpa.MyTableEntity;
 import io.github.mocanjie.base.myjpa.builder.SqlBuilder;
 import io.github.mocanjie.base.myjpa.builder.TableInfoBuilder;
 import io.github.mocanjie.base.myjpa.cache.TableCacheManager;
@@ -16,6 +17,7 @@ import io.github.mocanjie.base.myjpa.tenant.TenantIdProvider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.BeanUtils;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
@@ -24,8 +26,6 @@ import org.springframework.jdbc.core.namedparam.*;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.lang.Nullable;
-
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.io.Serializable;
@@ -149,7 +149,7 @@ public class BaseDaoImpl implements IBaseDao {
 	}
 
 	/** 通过反射将租户 ID 写入 PO 字段（仅当字段当前为 null 时才写入，自动做类型适配）。 */
-	private <PO> void setTenantField(Field field, PO po, Object tenantId) {
+	private <PO extends MyTableEntity> void setTenantField(Field field, PO po, Object tenantId) {
 		try {
 			if (field.get(po) != null) return;
 			Class<?> ft = field.getType();
@@ -238,15 +238,7 @@ public class BaseDaoImpl implements IBaseDao {
 	}
 
 	@Override
-	public <PO> PO querySingleByField(String fieldName, String fieldValue, Class<PO> clazz) {
-		String sql = SqlParser.getSelectByFieldSql(TableInfoBuilder.getTableInfo(clazz), fieldName);
-		Map<String, Object> param = new HashMap<>();
-		param.put(fieldName, fieldValue);
-		return querySingleForSql(sql, param, clazz);
-	}
-
-	@Override
-	public <PO> PO queryById(Object id, Class<PO> clazz) {
+	public <PO extends MyTableEntity> PO queryById(Object id, Class<PO> clazz) {
 		TableInfo tableInfo = TableInfoBuilder.getTableInfo(clazz);
 		String sql = SqlParser.getSelectByIdSql(tableInfo);
 		Map<String, Object> param = new HashMap<>();
@@ -255,7 +247,7 @@ public class BaseDaoImpl implements IBaseDao {
 	}
 
 	@Override
-	public <PO> Serializable insertPO(PO po, boolean autoCreateId) {
+	public <PO extends MyTableEntity> Serializable insertPO(PO po, boolean autoCreateId) {
 		try {
 			TableInfo tableInfo = TableInfoBuilder.getTableInfo(po.getClass());
 			if (autoCreateId) tableInfo.setPkValue(po);
@@ -298,21 +290,21 @@ public class BaseDaoImpl implements IBaseDao {
 	}
 
 	@Override
-	public <PO> int updatePO(PO po) {
+	public <PO extends MyTableEntity> int updatePO(PO po) {
 		return updatePO(po, true);
 	}
 
 	@Override
-	public <PO> int updatePO(PO po, boolean ignoreNull) {
+	public <PO extends MyTableEntity> int updatePO(PO po, boolean ignoreNull) {
 		return updatePO(po, ignoreNull, (String[]) null);
 	}
 
 	@Override
-	public <PO> int updatePO(PO po, @Nullable String... forceUpdateFields) {
+	public <PO extends MyTableEntity> int updatePO(PO po, @Nullable String... forceUpdateFields) {
 		return updatePO(po, true, forceUpdateFields);
 	}
 
-	private <PO> int updatePO(PO po, boolean ignoreNull, @Nullable String... forceUpdateFields) {
+	private <PO extends MyTableEntity> int updatePO(PO po, boolean ignoreNull, @Nullable String... forceUpdateFields) {
 		TableInfo tableInfo = TableInfoBuilder.getTableInfo(po.getClass());
 		String sql = SqlParser.getUpdateSql(tableInfo, po, ignoreNull, forceUpdateFields);
 		SqlParameterSource paramSource = new BeanPropertySqlParameterSource(po);
@@ -321,7 +313,7 @@ public class BaseDaoImpl implements IBaseDao {
 	}
 
 	@Override
-	public <PO> int delPO(PO po) {
+	public <PO extends MyTableEntity> int delPO(PO po) {
 		try {
 			TableInfo tableInfo = TableInfoBuilder.getTableInfo(po.getClass());
 			String sql = SqlParser.getDelByIdSql(tableInfo);
@@ -334,7 +326,7 @@ public class BaseDaoImpl implements IBaseDao {
 	}
 
 	@Override
-	public <PO> int delByIds(Class<PO> clazz, Object... id) {
+	public <PO extends MyTableEntity> int delByIds(Class<PO> clazz, Object... id) {
 		try {
 			TableInfo tableInfo = TableInfoBuilder.getTableInfo(clazz);
 			String sql = SqlParser.getDelByIdsSql(tableInfo);
@@ -368,7 +360,7 @@ public class BaseDaoImpl implements IBaseDao {
 	}
 
 	@Override
-	public <PO> Serializable batchInsertPO(List<PO> pos, boolean autoCreateId) {
+	public <PO extends MyTableEntity> Serializable batchInsertPO(List<PO> pos, boolean autoCreateId) {
 		if (pos == null || pos.isEmpty()) return 0;
 		try {
 			TableInfo tableInfo = TableInfoBuilder.getTableInfo(pos.get(0).getClass());
@@ -419,7 +411,7 @@ public class BaseDaoImpl implements IBaseDao {
 	}
 
 	@Override
-	public <PO> Serializable batchInsertPO(List<PO> pos, boolean autoCreateId, int batchSize) {
+	public <PO extends MyTableEntity> Serializable batchInsertPO(List<PO> pos, boolean autoCreateId, int batchSize) {
 		int totalSize = pos.size();
 		int batchCount = (int) Math.ceil((double) totalSize / batchSize);
 		int currentIndex = 0;

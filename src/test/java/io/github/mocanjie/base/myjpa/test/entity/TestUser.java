@@ -1,9 +1,10 @@
 package io.github.mocanjie.base.myjpa.test.entity;
 
+import io.github.mocanjie.base.myjpa.MyTableEntity;
 import io.github.mocanjie.base.myjpa.annotation.MyTable;
 
 @MyTable(value = "user", delColumn = "delete_flag", delField = "deleteFlag", delValue = 1)
-public class TestUser {
+public class TestUser implements MyTableEntity {
     private Long id;
     private String username;
     private Integer deleteFlag;

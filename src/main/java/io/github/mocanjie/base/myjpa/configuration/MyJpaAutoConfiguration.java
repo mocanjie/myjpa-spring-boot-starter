@@ -9,6 +9,7 @@ import io.github.mocanjie.base.myjpa.service.IBaseService;
 import io.github.mocanjie.base.myjpa.service.impl.BaseServiceImpl;
 import io.github.mocanjie.base.myjpa.validation.DatabaseSchemaValidator;
 import io.github.mocanjie.base.myjpa.validation.SchemaValidationRunner;
+import jakarta.annotation.PostConstruct;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.config.BeanPostProcessor;
@@ -22,7 +23,6 @@ import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.jdbc.core.JdbcTemplate;
 
-import jakarta.annotation.PostConstruct;
 import javax.sql.DataSource;
 
 @Configuration
