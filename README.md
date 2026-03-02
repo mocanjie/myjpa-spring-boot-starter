@@ -54,6 +54,8 @@ Pager<UserDTO> dtoPage = lambdaQuery(UserPO.class, UserDTO.class)
     .page(new Pager<>(1, 10));
 ```
 
+条件值为 `null`、空字符串（trim 后）或空集合时，该条件**自动跳过**，天然支持表单动态查询场景。
+
 生成的 SQL 自动经过逻辑删除 + 租户隔离管道，无需额外处理。
 
 ### 🗄️ 多数据库支持
@@ -305,6 +307,8 @@ protected <T extends MyTableEntity, R> LambdaQueryWrapper<T, R> lambdaQuery(Clas
 
 #### 条件方法（全部 AND 连接）
 
+> **自动跳过规则：** 当传入的值为 `null`、空白字符串（trim 后为空）或空集合时，该条件**不会**追加到 SQL，整个链式调用继续正常工作。`between` 任意一端为 `null` 时同样跳过。`isNull` / `isNotNull` 不受此规则影响。
+
 | 方法 | 示例 | 生成条件 |
 |---|---|---|
 | `eq(fn, val)` | `.eq(User::getName, "张三")` | `name = :p` |
@@ -321,6 +325,17 @@ protected <T extends MyTableEntity, R> LambdaQueryWrapper<T, R> lambdaQuery(Clas
 | `between(fn, v1, v2)` | `.between(User::getAge, 18, 60)` | `age BETWEEN :p0 AND :p1` |
 | `isNull(fn)` | `.isNull(User::getRemark)` | `remark IS NULL` |
 | `isNotNull(fn)` | `.isNotNull(User::getRemark)` | `remark IS NOT NULL` |
+
+典型的表单动态查询场景，直接透传前端参数即可，无需手动判空：
+
+```java
+// keyword / status 均可为 null 或空字符串，自动生成有效的 WHERE 子句
+List<UserPO> users = lambdaQuery(UserPO.class)
+    .like(UserPO::getUserName, keyword)   // keyword 为空 → 跳过
+    .eq(UserPO::getStatus, status)        // status 为 null → 跳过
+    .in(UserPO::getId, selectedIds)       // selectedIds 为空集合 → 跳过
+    .list();
+```
 
 #### 辅助方法
 
