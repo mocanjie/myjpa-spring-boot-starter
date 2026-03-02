@@ -153,4 +153,47 @@ class LambdaQueryWrapperTest {
                 "SELECT id, username FROM user WHERE delete_flag = :lwp0 ORDER BY id ASC",
                 q.buildSql());
     }
+
+    @Test
+    @Order(13)
+    @DisplayName("13. null 值自动跳过，不生成 SQL 片段")
+    void testSkipNull() {
+        // null 值 → 跳过，最终无 WHERE
+        assertEquals("SELECT * FROM user", wrapper().eq(TestUser::getUsername, null).buildSql());
+        // 混合：null 跳过，非 null 保留
+        LambdaQueryWrapper<TestUser, TestUser> q = wrapper()
+                .eq(TestUser::getUsername, null)
+                .eq(TestUser::getDeleteFlag, 0);
+        assertEquals("SELECT * FROM user WHERE delete_flag = :lwp0", q.buildSql());
+    }
+
+    @Test
+    @Order(14)
+    @DisplayName("14. 空字符串（trim 后）自动跳过")
+    void testSkipBlankString() {
+        assertEquals("SELECT * FROM user", wrapper().eq(TestUser::getUsername, "").buildSql());
+        assertEquals("SELECT * FROM user", wrapper().like(TestUser::getUsername, "  ").buildSql());
+        // 非空字符串正常生成
+        assertTrue(wrapper().like(TestUser::getUsername, "张").buildSql().contains("LIKE"));
+    }
+
+    @Test
+    @Order(15)
+    @DisplayName("15. 空集合自动跳过（避免 IN () 语法错误）")
+    void testSkipEmptyCollection() {
+        assertEquals("SELECT * FROM user",
+                wrapper().in(TestUser::getId, List.of()).buildSql());
+        assertEquals("SELECT * FROM user",
+                wrapper().notIn(TestUser::getId, List.of()).buildSql());
+    }
+
+    @Test
+    @Order(16)
+    @DisplayName("16. between 任意端为 null 则跳过")
+    void testSkipBetweenNull() {
+        assertEquals("SELECT * FROM user", wrapper().between(TestUser::getId, null, 100L).buildSql());
+        assertEquals("SELECT * FROM user", wrapper().between(TestUser::getId, 10L, null).buildSql());
+        // 两端均非 null 时正常生成
+        assertTrue(wrapper().between(TestUser::getId, 10L, 100L).buildSql().contains("BETWEEN"));
+    }
 }

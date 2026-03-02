@@ -56,11 +56,23 @@ public class LambdaQueryWrapper<T extends MyTableEntity, R> {
         return LambdaUtils.getColumnName(fn, entityClazz);
     }
 
+    /**
+     * 判断值是否为"空"：null、空白字符串、空集合均视为空，对应条件方法将自动跳过，不生成 SQL 片段。
+     */
+    private boolean isEmpty(Object val) {
+        if (val == null) return true;
+        if (val instanceof String s) return s.trim().isEmpty();
+        if (val instanceof Collection<?> c) return c.isEmpty();
+        return false;
+    }
+
     // =========================================================
     // 条件方法（全部 AND 连接，列名基于实体类 T）
+    // val 为 null / 空白字符串 / 空集合时自动跳过，不生成对应 SQL 片段
     // =========================================================
 
     public LambdaQueryWrapper<T, R> eq(SFunction<T, ?> fn, Object val) {
+        if (isEmpty(val)) return this;
         String p = nextParam();
         conditions.add(col(fn) + " = :" + p);
         params.put(p, val);
@@ -68,6 +80,7 @@ public class LambdaQueryWrapper<T extends MyTableEntity, R> {
     }
 
     public LambdaQueryWrapper<T, R> ne(SFunction<T, ?> fn, Object val) {
+        if (isEmpty(val)) return this;
         String p = nextParam();
         conditions.add(col(fn) + " != :" + p);
         params.put(p, val);
@@ -75,6 +88,7 @@ public class LambdaQueryWrapper<T extends MyTableEntity, R> {
     }
 
     public LambdaQueryWrapper<T, R> gt(SFunction<T, ?> fn, Object val) {
+        if (isEmpty(val)) return this;
         String p = nextParam();
         conditions.add(col(fn) + " > :" + p);
         params.put(p, val);
@@ -82,6 +96,7 @@ public class LambdaQueryWrapper<T extends MyTableEntity, R> {
     }
 
     public LambdaQueryWrapper<T, R> ge(SFunction<T, ?> fn, Object val) {
+        if (isEmpty(val)) return this;
         String p = nextParam();
         conditions.add(col(fn) + " >= :" + p);
         params.put(p, val);
@@ -89,6 +104,7 @@ public class LambdaQueryWrapper<T extends MyTableEntity, R> {
     }
 
     public LambdaQueryWrapper<T, R> lt(SFunction<T, ?> fn, Object val) {
+        if (isEmpty(val)) return this;
         String p = nextParam();
         conditions.add(col(fn) + " < :" + p);
         params.put(p, val);
@@ -96,6 +112,7 @@ public class LambdaQueryWrapper<T extends MyTableEntity, R> {
     }
 
     public LambdaQueryWrapper<T, R> le(SFunction<T, ?> fn, Object val) {
+        if (isEmpty(val)) return this;
         String p = nextParam();
         conditions.add(col(fn) + " <= :" + p);
         params.put(p, val);
@@ -103,6 +120,7 @@ public class LambdaQueryWrapper<T extends MyTableEntity, R> {
     }
 
     public LambdaQueryWrapper<T, R> like(SFunction<T, ?> fn, String val) {
+        if (isEmpty(val)) return this;
         String p = nextParam();
         conditions.add(col(fn) + " LIKE :" + p);
         params.put(p, "%" + val + "%");
@@ -110,6 +128,7 @@ public class LambdaQueryWrapper<T extends MyTableEntity, R> {
     }
 
     public LambdaQueryWrapper<T, R> likeLeft(SFunction<T, ?> fn, String val) {
+        if (isEmpty(val)) return this;
         String p = nextParam();
         conditions.add(col(fn) + " LIKE :" + p);
         params.put(p, "%" + val);
@@ -117,6 +136,7 @@ public class LambdaQueryWrapper<T extends MyTableEntity, R> {
     }
 
     public LambdaQueryWrapper<T, R> likeRight(SFunction<T, ?> fn, String val) {
+        if (isEmpty(val)) return this;
         String p = nextParam();
         conditions.add(col(fn) + " LIKE :" + p);
         params.put(p, val + "%");
@@ -124,6 +144,7 @@ public class LambdaQueryWrapper<T extends MyTableEntity, R> {
     }
 
     public LambdaQueryWrapper<T, R> in(SFunction<T, ?> fn, Collection<?> vals) {
+        if (isEmpty(vals)) return this;
         String p = nextParam();
         conditions.add(col(fn) + " IN (:" + p + ")");
         params.put(p, vals);
@@ -131,6 +152,7 @@ public class LambdaQueryWrapper<T extends MyTableEntity, R> {
     }
 
     public LambdaQueryWrapper<T, R> notIn(SFunction<T, ?> fn, Collection<?> vals) {
+        if (isEmpty(vals)) return this;
         String p = nextParam();
         conditions.add(col(fn) + " NOT IN (:" + p + ")");
         params.put(p, vals);
@@ -138,6 +160,7 @@ public class LambdaQueryWrapper<T extends MyTableEntity, R> {
     }
 
     public LambdaQueryWrapper<T, R> between(SFunction<T, ?> fn, Object v1, Object v2) {
+        if (isEmpty(v1) || isEmpty(v2)) return this;
         String p1 = nextParam();
         String p2 = nextParam();
         conditions.add(col(fn) + " BETWEEN :" + p1 + " AND :" + p2);
