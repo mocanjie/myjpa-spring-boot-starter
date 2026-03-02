@@ -26,15 +26,15 @@ class LambdaQueryWrapperTest {
         TableCacheManager.initCache("io.github.mocanjie.base.myjpa.test.entity");
     }
 
-    private LambdaQueryWrapper<TestUser> wrapper() {
-        return new LambdaQueryWrapper<>(TestUser.class, null);
+    private LambdaQueryWrapper<TestUser, TestUser> wrapper() {
+        return new LambdaQueryWrapper<>(TestUser.class, TestUser.class, null);
     }
 
     @Test
     @Order(1)
     @DisplayName("1. eq 条件生成")
     void testEq() {
-        LambdaQueryWrapper<TestUser> q = wrapper().eq(TestUser::getUsername, "张三");
+        LambdaQueryWrapper<TestUser, TestUser> q = wrapper().eq(TestUser::getUsername, "张三");
         assertEquals("SELECT * FROM user WHERE username = :lwp0", q.buildSql());
         assertEquals("张三", q.getParams().get("lwp0"));
     }
@@ -43,7 +43,7 @@ class LambdaQueryWrapperTest {
     @Order(2)
     @DisplayName("2. ne 条件生成")
     void testNe() {
-        LambdaQueryWrapper<TestUser> q = wrapper().ne(TestUser::getUsername, "李四");
+        LambdaQueryWrapper<TestUser, TestUser> q = wrapper().ne(TestUser::getUsername, "李四");
         assertEquals("SELECT * FROM user WHERE username != :lwp0", q.buildSql());
         assertEquals("李四", q.getParams().get("lwp0"));
     }
@@ -62,7 +62,7 @@ class LambdaQueryWrapperTest {
     @Order(4)
     @DisplayName("4. like / likeLeft / likeRight 条件生成")
     void testLike() {
-        LambdaQueryWrapper<TestUser> q = wrapper().like(TestUser::getUsername, "张");
+        LambdaQueryWrapper<TestUser, TestUser> q = wrapper().like(TestUser::getUsername, "张");
         assertEquals("SELECT * FROM user WHERE username LIKE :lwp0", q.buildSql());
         assertEquals("%张%", q.getParams().get("lwp0"));
 
@@ -75,7 +75,7 @@ class LambdaQueryWrapperTest {
     @DisplayName("5. in / notIn 条件生成")
     void testIn() {
         List<Long> ids = Arrays.asList(1L, 2L, 3L);
-        LambdaQueryWrapper<TestUser> q = wrapper().in(TestUser::getId, ids);
+        LambdaQueryWrapper<TestUser, TestUser> q = wrapper().in(TestUser::getId, ids);
         assertEquals("SELECT * FROM user WHERE id IN (:lwp0)", q.buildSql());
         assertEquals(ids, q.getParams().get("lwp0"));
 
@@ -86,7 +86,7 @@ class LambdaQueryWrapperTest {
     @Order(6)
     @DisplayName("6. between 条件生成")
     void testBetween() {
-        LambdaQueryWrapper<TestUser> q = wrapper().between(TestUser::getId, 10L, 100L);
+        LambdaQueryWrapper<TestUser, TestUser> q = wrapper().between(TestUser::getId, 10L, 100L);
         assertEquals("SELECT * FROM user WHERE id BETWEEN :lwp0 AND :lwp1", q.buildSql());
         assertEquals(10L, q.getParams().get("lwp0"));
         assertEquals(100L, q.getParams().get("lwp1"));
@@ -106,7 +106,7 @@ class LambdaQueryWrapperTest {
     @Order(8)
     @DisplayName("8. select 指定列")
     void testSelect() {
-        LambdaQueryWrapper<TestUser> q = wrapper().select(TestUser::getId, TestUser::getUsername);
+        LambdaQueryWrapper<TestUser, TestUser> q = wrapper().select(TestUser::getId, TestUser::getUsername);
         assertEquals("SELECT id, username FROM user", q.buildSql());
     }
 
@@ -114,7 +114,7 @@ class LambdaQueryWrapperTest {
     @Order(9)
     @DisplayName("9. orderByAsc / orderByDesc")
     void testOrder() {
-        LambdaQueryWrapper<TestUser> q = wrapper()
+        LambdaQueryWrapper<TestUser, TestUser> q = wrapper()
                 .eq(TestUser::getDeleteFlag, 0)
                 .orderByAsc(TestUser::getId)
                 .orderByDesc(TestUser::getUsername);
@@ -125,7 +125,7 @@ class LambdaQueryWrapperTest {
     @Order(10)
     @DisplayName("10. 多条件 AND 组合")
     void testMultipleConditions() {
-        LambdaQueryWrapper<TestUser> q = wrapper()
+        LambdaQueryWrapper<TestUser, TestUser> q = wrapper()
                 .eq(TestUser::getUsername, "张三")
                 .gt(TestUser::getId, 0L)
                 .isNotNull(TestUser::getDeleteFlag);
@@ -145,7 +145,7 @@ class LambdaQueryWrapperTest {
     @Order(12)
     @DisplayName("12. select + 条件 + 排序组合")
     void testFullQuery() {
-        LambdaQueryWrapper<TestUser> q = wrapper()
+        LambdaQueryWrapper<TestUser, TestUser> q = wrapper()
                 .select(TestUser::getId, TestUser::getUsername)
                 .eq(TestUser::getDeleteFlag, 0)
                 .orderByAsc(TestUser::getId);

@@ -135,8 +135,14 @@ public class BaseServiceImpl implements IBaseService {
 		return this.batchInsertPO(pos, true, batchSize);
 	}
 
-	protected <T> LambdaQueryWrapper<T> lambdaQuery(Class<T> clazz) {
-		return new LambdaQueryWrapper<>(clazz, baseDao);
+	/** 实体即结果类型（最常用） */
+	protected <T extends MyTableEntity> LambdaQueryWrapper<T, T> lambdaQuery(Class<T> clazz) {
+		return new LambdaQueryWrapper<>(clazz, clazz, baseDao);
+	}
+
+	/** 实体用于条件构造，结果映射到指定 DTO/VO */
+	protected <T extends MyTableEntity, R> LambdaQueryWrapper<T, R> lambdaQuery(Class<T> entityClazz, Class<R> resultClazz) {
+		return new LambdaQueryWrapper<>(entityClazz, resultClazz, baseDao);
 	}
 
 }
