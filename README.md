@@ -14,9 +14,11 @@
 - 零 XML 配置，开箱即用
 
 ### 🔗 Lambda 链式查询 API
-类型安全的条件构造器，告别手写 SQL 字符串：
+类型安全的条件构造器，告别手写 SQL 字符串。支持两种模式：
 
 ```java
+// ── 模式一：实体即结果（最常用）──────────────────────────
+
 // 查询列表
 List<UserPO> users = lambdaQuery(UserPO.class)
     .eq(UserPO::getStatus, 1)
@@ -29,20 +31,27 @@ UserPO user = lambdaQuery(UserPO.class)
     .eq(UserPO::getId, 1L)
     .one();
 
-// 统计
-long count = lambdaQuery(UserPO.class)
-    .eq(UserPO::getStatus, 1)
-    .count();
+// 统计 / 存在性
+long count = lambdaQuery(UserPO.class).eq(UserPO::getStatus, 1).count();
+boolean exists = lambdaQuery(UserPO.class).eq(UserPO::getPhone, "138...").exists();
 
 // 分页
 Pager<UserPO> page = lambdaQuery(UserPO.class)
     .ge(UserPO::getAge, 18)
     .page(new Pager<>(1, 10));
 
-// 存在性判断
-boolean exists = lambdaQuery(UserPO.class)
-    .eq(UserPO::getPhone, "138...")
-    .exists();
+// ── 模式二：结果映射到 DTO/VO ──────────────────────────
+
+// 条件和列引用基于实体（UserPO），结果自动映射到 DTO
+List<UserDTO> dtos = lambdaQuery(UserPO.class, UserDTO.class)
+    .select(UserPO::getId, UserPO::getName, UserPO::getStatus)
+    .eq(UserPO::getStatus, 1)
+    .orderByDesc(UserPO::getCreateTime)
+    .list();
+
+Pager<UserDTO> dtoPage = lambdaQuery(UserPO.class, UserDTO.class)
+    .like(UserPO::getName, "张")
+    .page(new Pager<>(1, 10));
 ```
 
 生成的 SQL 自动经过逻辑删除 + 租户隔离管道，无需额外处理。
@@ -214,6 +223,18 @@ public class UserService extends BaseServiceImpl {
             .eq(UserPO::getStatus, 1)
             .list();
 
+        // 结果映射到 DTO（条件/列引用仍基于实体 UserPO）
+        List<UserDTO> dtos = lambdaQuery(UserPO.class, UserDTO.class)
+            .select(UserPO::getId, UserPO::getUserName)
+            .eq(UserPO::getStatus, 1)
+            .orderByDesc(UserPO::getId)
+            .list();
+
+        // DTO 分页
+        Pager<UserDTO> dtoPage = lambdaQuery(UserPO.class, UserDTO.class)
+            .like(UserPO::getUserName, "张")
+            .page(new Pager<>(1, 10));
+
         // ─────────────────────────────────────────────
         // 写操作
         // ─────────────────────────────────────────────
@@ -265,7 +286,22 @@ public class UserService extends BaseServiceImpl {
 
 ### Lambda 链式查询
 
-通过 `lambdaQuery(Class<T>)` 获得 `LambdaQueryWrapper<T>`，链式拼接条件后调用终结方法执行查询。
+`LambdaQueryWrapper<T, R>` 有两个类型参数：
+
+| 参数 | 约束 | 作用 |
+|---|---|---|
+| `T` | `extends MyTableEntity` | 实体类，决定表名及列映射（条件、排序、select 均基于此） |
+| `R` | 无约束 | 结果类，终结方法的返回类型（可以是实体本身或任意 DTO/VO） |
+
+两个入口方法：
+
+```java
+// 实体即结果（T == R，最常用）
+protected <T extends MyTableEntity> LambdaQueryWrapper<T, T> lambdaQuery(Class<T> clazz)
+
+// 结果映射到 DTO/VO（T 用于条件，R 用于接收结果）
+protected <T extends MyTableEntity, R> LambdaQueryWrapper<T, R> lambdaQuery(Class<T> entityClazz, Class<R> resultClazz)
+```
 
 #### 条件方法（全部 AND 连接）
 
@@ -300,12 +336,14 @@ public class UserService extends BaseServiceImpl {
 #### 终结方法
 
 ```java
-List<T>    .list()         // 查询列表
-T          .one()          // 查询单条（无结果返回 null）
+List<R>    .list()         // 查询列表
+R          .one()          // 查询单条（无结果返回 null）
 long       .count()        // 统计数量
-Pager<T>   .page(pager)    // 分页查询
+Pager<R>   .page(pager)    // 分页查询
 boolean    .exists()       // 存在性判断
 ```
+
+> `R` 为实体本身（单参数入口）时，与之前行为完全一致；指定 DTO 类时，框架按列名自动映射字段。
 
 ---
 
