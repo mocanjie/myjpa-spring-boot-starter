@@ -10,7 +10,42 @@
 ### 📝 注解驱动开发
 - `@MyTable` - 实体类与数据库表映射，支持逻辑删除配置
 - `@MyField` - 字段与列映射，支持序列化控制
+- `MyTableEntity` - 标记接口，编译期强制规范（APT 自动校验）
 - 零 XML 配置，开箱即用
+
+### 🔗 Lambda 链式查询 API
+类型安全的条件构造器，告别手写 SQL 字符串：
+
+```java
+// 查询列表
+List<UserPO> users = lambdaQuery(UserPO.class)
+    .eq(UserPO::getStatus, 1)
+    .like(UserPO::getName, "张")
+    .orderByDesc(UserPO::getCreateTime)
+    .list();
+
+// 查询单条
+UserPO user = lambdaQuery(UserPO.class)
+    .eq(UserPO::getId, 1L)
+    .one();
+
+// 统计
+long count = lambdaQuery(UserPO.class)
+    .eq(UserPO::getStatus, 1)
+    .count();
+
+// 分页
+Pager<UserPO> page = lambdaQuery(UserPO.class)
+    .ge(UserPO::getAge, 18)
+    .page(new Pager<>(1, 10));
+
+// 存在性判断
+boolean exists = lambdaQuery(UserPO.class)
+    .eq(UserPO::getPhone, "138...")
+    .exists();
+```
+
+生成的 SQL 自动经过逻辑删除 + 租户隔离管道，无需额外处理。
 
 ### 🗄️ 多数据库支持
 - MySQL
@@ -68,6 +103,8 @@ WHERE u.delete_flag = 0
 - 发现不匹配时输出警告信息
 - 支持通过配置开启/关闭
 
+---
+
 ## 📦 快速开始
 
 ### Maven 依赖
@@ -102,195 +139,255 @@ myjpa:
 
 ### 定义实体类
 
+实体类必须同时满足两个条件（APT 编译期校验，缺一报错）：
+1. 标注 `@MyTable`
+2. 实现 `MyTableEntity` 接口
+
 ```java
-@MyTable(name = "sys_user", deleteField = "delete_flag", deleteValue = "1")
-public class User {
-    @MyField(name = "id", isPrimaryKey = true)
+import io.github.mocanjie.base.myjpa.MyTableEntity;
+import io.github.mocanjie.base.myjpa.annotation.MyTable;
+import io.github.mocanjie.base.myjpa.annotation.MyField;
+
+@MyTable(
+    value      = "sys_user",      // 表名（必填）
+    pkColumn   = "id",            // 主键列名（默认 "id"）
+    pkField    = "id",            // 主键字段名（默认 "id"）
+    delColumn  = "delete_flag",   // 逻辑删除列名（默认 "delete_flag"）
+    delField   = "deleteFlag",    // 逻辑删除字段名（默认 "deleteFlag"）
+    delValue   = 1                // 已删除标记值（默认 1）
+)
+public class UserPO implements MyTableEntity {
+
     private Long id;
 
-    @MyField(name = "username")
-    private String username;
+    @MyField("user_name")   // 列名与字段名不同时使用
+    private String userName;
 
-    @MyField(name = "delete_flag")
-    private Integer deleteFlag;
+    private Integer status;
+
+    @MyField(serialize = false)  // serialize=false：排除在 INSERT/UPDATE 之外
+    private String deleteFlag;
 
     // getters and setters
 }
 ```
 
+> **说明：** 若字段名符合驼峰转下划线规则（如 `userName` → `user_name`），无需标注 `@MyField`，框架自动转换。
+
 ### 创建 Service
 
 ```java
 @Service
-public class UserService extends BaseServiceImpl<User> {
+public class UserService extends BaseServiceImpl {
 
-    // 继承了基础 CRUD 方法
     public void example() {
-        // 1. 保存单个实体
-        User user = new User();
-        user.setUsername("test");
-        insertPO(user);  // 自动生成ID
-        // 或者手动控制ID生成：insertPO(user, false)
+        // ─────────────────────────────────────────────
+        // Lambda 链式查询（推荐，类型安全）
+        // ─────────────────────────────────────────────
 
-        // 2. 批量保存
-        List<User> users = Arrays.asList(user1, user2, user3);
-        batchInsertPO(users);  // 自动生成ID
-        // 或者：batchInsertPO(users, true, 100)  // 指定批次大小
+        // 条件查询列表
+        List<UserPO> users = lambdaQuery(UserPO.class)
+            .eq(UserPO::getStatus, 1)
+            .like(UserPO::getUserName, "张")
+            .orderByDesc(UserPO::getId)
+            .list();
 
-        // 3. 更新实体
-        user.setUsername("updated");
-        updatePO(user);  // 更新所有字段
-        // 或者：updatePO(user, true)  // 忽略null值
-        // 或者：updatePO(user, "username", "email")  // 强制更新指定字段
+        // 查询单条
+        UserPO user = lambdaQuery(UserPO.class)
+            .eq(UserPO::getId, 1L)
+            .one();
 
-        // 4. 根据ID查询
-        User found = queryById(1L, User.class);
-        // 或者：queryById("user123", User.class)
+        // 统计
+        long count = lambdaQuery(UserPO.class)
+            .eq(UserPO::getStatus, 1)
+            .count();
 
-        // 5. 根据字段查询单条记录
-        User userByName = querySingleByField("username", "test", User.class);
+        // 分页
+        Pager<UserPO> page = lambdaQuery(UserPO.class)
+            .ge(UserPO::getStatus, 0)
+            .orderByAsc(UserPO::getId)
+            .page(new Pager<>(1, 10));
 
-        // 6. 自定义SQL查询（使用Map参数 + 命名参数）
+        // 指定返回列
+        List<UserPO> partial = lambdaQuery(UserPO.class)
+            .select(UserPO::getId, UserPO::getUserName)
+            .eq(UserPO::getStatus, 1)
+            .list();
+
+        // ─────────────────────────────────────────────
+        // 写操作
+        // ─────────────────────────────────────────────
+
+        // 插入（自动生成 ID）
+        UserPO newUser = new UserPO();
+        newUser.setUserName("张三");
+        insertPO(newUser);
+
+        // 批量插入（指定批次大小）
+        List<UserPO> batch = List.of(user1, user2, user3);
+        batchInsertPO(batch, true, 100);
+
+        // 更新（忽略 null 字段）
+        user.setUserName("李四");
+        updatePO(user);
+
+        // 强制更新指定字段（即使为 null）
+        updatePO(user, "userName", "status");
+
+        // 根据 ID 查询
+        UserPO found = queryById(1L, UserPO.class);
+
+        // 删除（取决于 @MyTable 配置：逻辑删除或物理删除）
+        delPO(user);
+        delByIds(UserPO.class, 1L, 2L, 3L);
+
+        // ─────────────────────────────────────────────
+        // 自定义 SQL 查询（Map 参数）
+        // ─────────────────────────────────────────────
         Map<String, Object> params = new HashMap<>();
         params.put("age", 18);
-        params.put("status", 1);
-        List<User> activeUsers = queryListForSql(
-            "SELECT * FROM sys_user WHERE age > :age AND status = :status",
-            params,
-            User.class
-        );
-
-        // 7. 自定义SQL查询（使用对象参数）
-        UserQueryParam queryParam = new UserQueryParam();
-        queryParam.setAge(18);
-        List<User> users2 = queryListForSql(
-            "SELECT * FROM sys_user WHERE age > :age",
-            queryParam,
-            User.class
-        );
-
-        // 8. 查询单条记录
-        User single = querySingleForSql(
-            "SELECT * FROM sys_user WHERE username = :username",
-            params,
-            User.class
-        );
-
-        // 9. 分页查询
-        Pager<User> pager = new Pager<>(1, 10);  // 第1页，每页10条
-        Pager<User> result = queryPageForSql(
+        List<UserPO> activeUsers = queryListForSql(
             "SELECT * FROM sys_user WHERE age > :age",
             params,
-            pager,
-            User.class
+            UserPO.class
         );
-        List<User> pageData = result.getRows();
-        long total = result.getTotalRows();
 
-        // 10. 删除实体
-        delPO(user);  // 逻辑删除或物理删除（取决于@MyTable配置）
-
-        // 11. 批量删除
-        delByIds(User.class, 1L, 2L, 3L);  // 可变参数
+        // 分页（自定义 SQL）
+        Pager<UserPO> pager = new Pager<>(1, 10);
+        queryPageForSql("SELECT * FROM sys_user WHERE age > :age", params, pager, UserPO.class);
     }
 }
 ```
 
+---
+
 ## 🔧 核心 API
+
+### Lambda 链式查询
+
+通过 `lambdaQuery(Class<T>)` 获得 `LambdaQueryWrapper<T>`，链式拼接条件后调用终结方法执行查询。
+
+#### 条件方法（全部 AND 连接）
+
+| 方法 | 示例 | 生成条件 |
+|---|---|---|
+| `eq(fn, val)` | `.eq(User::getName, "张三")` | `name = :p` |
+| `ne(fn, val)` | `.ne(User::getStatus, 0)` | `status != :p` |
+| `gt(fn, val)` | `.gt(User::getAge, 18)` | `age > :p` |
+| `ge(fn, val)` | `.ge(User::getAge, 18)` | `age >= :p` |
+| `lt(fn, val)` | `.lt(User::getAge, 60)` | `age < :p` |
+| `le(fn, val)` | `.le(User::getAge, 60)` | `age <= :p` |
+| `like(fn, val)` | `.like(User::getName, "张")` | `name LIKE '%张%'` |
+| `likeLeft(fn, val)` | `.likeLeft(User::getName, "三")` | `name LIKE '%三'` |
+| `likeRight(fn, val)` | `.likeRight(User::getName, "张")` | `name LIKE '张%'` |
+| `in(fn, collection)` | `.in(User::getId, ids)` | `id IN (:p)` |
+| `notIn(fn, collection)` | `.notIn(User::getId, ids)` | `id NOT IN (:p)` |
+| `between(fn, v1, v2)` | `.between(User::getAge, 18, 60)` | `age BETWEEN :p0 AND :p1` |
+| `isNull(fn)` | `.isNull(User::getRemark)` | `remark IS NULL` |
+| `isNotNull(fn)` | `.isNotNull(User::getRemark)` | `remark IS NOT NULL` |
+
+#### 辅助方法
+
+```java
+// 指定返回列（默认 SELECT *）
+.select(User::getId, User::getName)
+
+// 排序
+.orderByAsc(User::getAge)
+.orderByDesc(User::getCreateTime)
+```
+
+#### 终结方法
+
+```java
+List<T>    .list()         // 查询列表
+T          .one()          // 查询单条（无结果返回 null）
+long       .count()        // 统计数量
+Pager<T>   .page(pager)    // 分页查询
+boolean    .exists()       // 存在性判断
+```
+
+---
 
 ### IBaseService 接口
 
-所有 Service 继承 `BaseServiceImpl` 后自动拥有以下方法：
-
 #### 插入操作
 ```java
-<PO> Serializable insertPO(PO po);  // 插入单条，自动生成ID
-<PO> Serializable insertPO(PO po, boolean autoCreateId);  // 控制是否自动生成ID
-<PO> Serializable batchInsertPO(List<PO> pos);  // 批量插入，自动生成ID
-<PO> Serializable batchInsertPO(List<PO> pos, boolean autoCreateId);  // 批量插入，控制ID生成
-<PO> Serializable batchInsertPO(List<PO> pos, int batchSize);  // 批量插入，指定批次大小
-<PO> Serializable batchInsertPO(List<PO> pos, boolean autoCreateId, int batchSize);  // 完整控制
+<PO extends MyTableEntity> Serializable insertPO(PO po);
+<PO extends MyTableEntity> Serializable insertPO(PO po, boolean autoCreateId);
+<PO extends MyTableEntity> Serializable batchInsertPO(List<PO> pos);
+<PO extends MyTableEntity> Serializable batchInsertPO(List<PO> pos, boolean autoCreateId);
+<PO extends MyTableEntity> Serializable batchInsertPO(List<PO> pos, int batchSize);
+<PO extends MyTableEntity> Serializable batchInsertPO(List<PO> pos, boolean autoCreateId, int batchSize);
 ```
 
 #### 更新操作
 ```java
-<PO> int updatePO(PO po);  // 更新所有字段
-<PO> int updatePO(PO po, boolean ignoreNull);  // ignoreNull=true时不更新null字段
-<PO> int updatePO(PO po, String... forceUpdateProperties);  // 强制更新指定字段（即使为null）
+<PO extends MyTableEntity> int updatePO(PO po);
+<PO extends MyTableEntity> int updatePO(PO po, boolean ignoreNull);
+<PO extends MyTableEntity> int updatePO(PO po, String... forceUpdateProperties);
 ```
 
 #### 查询操作
 ```java
-// 根据ID查询
-<PO> PO queryById(String id, Class<PO> clazz);
-<PO> PO queryById(Long id, Class<PO> clazz);
+// 根据 ID 查询
+<PO extends MyTableEntity> PO queryById(String id, Class<PO> clazz);
+<PO extends MyTableEntity> PO queryById(Long id, Class<PO> clazz);
 
-// 根据字段查询单条记录
-<T> T querySingleByField(String fieldName, String fieldValue, Class<T> clazz);
+// 自定义 SQL 查询（Object 参数）
+<T> List<T>    queryListForSql(String sql, Object param, Class<T> clazz);
+<T> T          querySingleForSql(String sql, Object param, Class<T> clazz);
+<T> Pager<T>   queryPageForSql(String sql, Object param, Pager<T> pager, Class<T> clazz);
 
-// 自定义SQL查询（Object参数方式）
-<T> List<T> queryListForSql(String sql, Object param, Class<T> clazz);
-<T> T querySingleForSql(String sql, Object param, Class<T> clazz);
-<T> Pager<T> queryPageForSql(String sql, Object param, Pager<T> pager, Class<T> clazz);
-
-// 自定义SQL查询（Map参数方式）
-<T> List<T> queryListForSql(String sql, Map<String, Object> param, Class<T> clazz);
-<T> T querySingleForSql(String sql, Map<String, Object> param, Class<T> clazz);
-<T> Pager<T> queryPageForSql(String sql, Map<String, Object> param, Pager<T> pager, Class<T> clazz);
+// 自定义 SQL 查询（Map 参数）
+<T> List<T>    queryListForSql(String sql, Map<String, Object> param, Class<T> clazz);
+<T> T          querySingleForSql(String sql, Map<String, Object> param, Class<T> clazz);
+<T> Pager<T>   queryPageForSql(String sql, Map<String, Object> param, Pager<T> pager, Class<T> clazz);
 ```
+
+> **说明：** `queryXxxForSql` 系列方法的返回类型 `<T>` 不要求 `extends MyTableEntity`，可直接映射到 DTO/VO 等任意 POJO。
 
 #### 删除操作
 ```java
-<PO> int delPO(PO po);  // 删除单个实体（物理删除或逻辑删除取决于@MyTable配置）
-<PO> int delByIds(Class<PO> clazz, Object... id);  // 批量删除（支持可变参数）
+<PO extends MyTableEntity> int delPO(PO po);
+<PO extends MyTableEntity> int delByIds(Class<PO> clazz, Object... id);
 ```
+
+---
 
 ### 自动逻辑删除条件注入
 
-所有查询方法均已内置智能删除条件注入，**无需任何额外调用**。框架会自动解析 SQL 中涉及的表名，对配置了 `@MyTable` 逻辑删除字段的表追加对应条件。
+所有查询方法均已内置智能删除条件注入，**无需任何额外调用**。
 
 ```java
-@Service
-public class UserService extends BaseServiceImpl<User> {
+// 写普通 SQL 即可，框架自动追加删除条件
+// 实际执行：SELECT * FROM sys_user WHERE age > :age AND sys_user.delete_flag = 0
+List<UserPO> users = queryListForSql(
+    "SELECT * FROM sys_user WHERE age > :age",
+    params,
+    UserPO.class
+);
 
-    public void example() {
-        Map<String, Object> params = new HashMap<>();
-        params.put("age", 18);
-
-        // 写普通 SQL 即可，框架自动追加删除条件
-        // 实际执行：SELECT * FROM sys_user WHERE age > :age AND sys_user.delete_flag = 0
-        List<User> users = queryListForSql(
-            "SELECT * FROM sys_user WHERE age > :age",
-            params,
-            User.class
-        );
-
-        // JOIN 查询同样自动处理，LEFT JOIN 条件追加到 ON 子句
-        // 实际执行：
-        //   SELECT u.*, r.role_name
-        //   FROM sys_user u
-        //   LEFT JOIN role r ON u.role_id = r.id AND r.is_deleted = 0
-        //   WHERE u.age > :age AND u.delete_flag = 0
-        List<UserVO> userWithRoles = queryListForSql(
-            "SELECT u.*, r.role_name FROM sys_user u LEFT JOIN role r ON u.role_id = r.id WHERE u.age > :age",
-            params,
-            UserVO.class
-        );
-    }
-}
+// JOIN 查询：LEFT JOIN 条件追加到 ON 子句
+// 实际执行：
+//   SELECT u.*, r.role_name
+//   FROM sys_user u
+//   LEFT JOIN role r ON u.role_id = r.id AND r.is_deleted = 0
+//   WHERE u.age > :age AND u.delete_flag = 0
+List<UserVO> userWithRoles = queryListForSql(
+    "SELECT u.*, r.role_name FROM sys_user u LEFT JOIN role r ON u.role_id = r.id WHERE u.age > :age",
+    params,
+    UserVO.class
+);
 ```
 
 > **注意：** 若某张表未配置 `@MyTable` 逻辑删除字段，框架不会对该表追加任何条件，行为与普通查询完全一致。
 
+---
+
 ### 多租户隔离（可选）
 
 > 默认**关闭**，需显式配置 `myjpa.tenant.enabled=true` 开启。
-
-#### 工作原理
-
-1. **启动时**：框架扫描数据库表结构，自动发现含有配置列名（默认 `tenant_id`）的表，无需修改任何实体类或注解。
-2. **查询时**：自动追加 `AND table.tenant_id = :tenantId` 条件，JOIN 策略与逻辑删除一致（LEFT JOIN 加到 ON，其余加到 WHERE）。
-3. **超管**：`getTenantId()` 返回 `null` 时不注入任何条件，实现超级管理员查全量数据。
 
 #### 快速接入
 
@@ -313,7 +410,7 @@ public TenantIdProvider tenantIdProvider() {
 }
 ```
 
-> 若不使用 Spring Security，也可通过 `TenantContext.setTenantId(id)` 在拦截器中手动设置（ThreadLocal 方式，作为 SPI 的备选）。
+> 若不使用 Spring Security，也可通过 `TenantContext.setTenantId(id)` 在拦截器中手动设置（ThreadLocal 方式）。
 
 #### SQL 自动改写示例
 
@@ -338,106 +435,131 @@ WHERE u.tenant_id = 5
 
 ```java
 // 方式一：Lambda 形式（推荐，自动恢复）
-List<User> allUsers = TenantContext.withoutTenant(
-    () -> queryListForSql("SELECT * FROM user", null, User.class)
+List<UserPO> allUsers = TenantContext.withoutTenant(
+    () -> queryListForSql("SELECT * FROM user", null, UserPO.class)
 );
 
 // 方式二：手动控制
 TenantContext.skip();
 try {
-    return queryListForSql("SELECT * FROM user", null, User.class);
+    return queryListForSql("SELECT * FROM user", null, UserPO.class);
 } finally {
     TenantContext.restore();
 }
 ```
 
-> **注意：** 若某张表在数据库中不存在 `tenant_id` 列，框架自动跳过该表，不会注入任何条件。
+---
 
 ### 参数绑定说明
 
-**重要：** 本框架使用 **命名参数** 而非 JDBC 的 `?` 占位符。
+**重要：** 本框架使用**命名参数**而非 JDBC 的 `?` 占位符。
 
-#### ✅ 正确写法（命名参数）
 ```java
-Map<String, Object> params = new HashMap<>();
-params.put("username", "test");
-params.put("age", 18);
-
+// ✅ 正确：命名参数
+Map<String, Object> params = Map.of("username", "test", "age", 18);
 queryListForSql(
     "SELECT * FROM sys_user WHERE username = :username AND age > :age",
     params,
-    User.class
+    UserPO.class
 );
+
+// ❌ 错误：不支持 ? 占位符
+queryListForSql("SELECT * FROM sys_user WHERE username = ?", ...);
 ```
 
-#### ❌ 错误写法（不支持）
-```java
-// ❌ 不支持 ? 占位符 + 可变参数
-queryListForSql(
-    "SELECT * FROM sys_user WHERE username = ? AND age > ?",
-    "test", 18  // 这种方式不支持！
-);
-```
+也可以使用 POJO 对象作为参数，框架自动从属性中提取命名参数值：
 
-#### 使用对象作为参数
 ```java
-public class UserQueryParam {
-    private String username;
-    private Integer age;
-    // getters and setters
-}
-
 UserQueryParam param = new UserQueryParam();
 param.setUsername("test");
 param.setAge(18);
-
-// 对象的属性名对应SQL中的命名参数
 queryListForSql(
     "SELECT * FROM sys_user WHERE username = :username AND age > :age",
-    param,  // 框架会自动从对象中提取属性值
-    User.class
+    param,
+    UserPO.class
 );
 ```
+
+---
+
+## 🛡️ 编译期规范校验（APT）
+
+框架内置 APT 注解处理器，在**编译时**强制执行实体类规范，防止配置遗漏导致的运行时异常。
+
+### 双向绑定规则
+
+| 规则 | 说明 |
+|---|---|
+| **Rule-1** | 标注了 `@MyTable` 的类必须实现 `MyTableEntity` 接口 |
+| **Rule-2** | 实现了 `MyTableEntity` 的具体类必须标注 `@MyTable` |
+
+违反任一规则将在 `mvn compile` 时产生**编译错误**：
+
+```
+// 违反 Rule-1：有 @MyTable 但未实现 MyTableEntity
+error: [@MyTable 规范] com.example.UserPO 标注了 @MyTable 但未实现 MyTableEntity 接口
+
+// 违反 Rule-2：实现了 MyTableEntity 但无 @MyTable
+error: [@MyTable 规范] com.example.UserPO 实现了 MyTableEntity 接口但未标注 @MyTable 注解
+```
+
+> **说明：** 抽象类和接口不受 Rule-2 约束，可作为中间基类使用。
+
+---
 
 ## 🏗️ 架构设计
 
 ```
-MyJpaAutoConfiguration (自动配置)
+MyJpaAutoConfiguration（自动配置）
     ↓
-TableInfoBuilder (元数据构建)
+TableInfoBuilder（元数据构建 + APT 规范校验）
     ↓
-BaseServiceImpl (服务层)
+BaseServiceImpl（服务层）
+    ├── lambdaQuery() → LambdaQueryWrapper（链式条件构造）
+    └── queryXxxForSql / insertPO / updatePO / delPO ...
     ↓
-BaseDaoImpl (DAO 层)
+BaseDaoImpl（DAO 层）
     ↓
-SqlBuilder (SQL 生成)
+JSqlDynamicSqlParser（逻辑删除 + 租户条件注入）
     ↓
-JdbcTemplate (数据访问)
+SqlBuilder（多数据库 SQL 方言）
+    ↓
+JdbcTemplate（数据访问）
 ```
 
 ### 核心组件
 
-- **TableCacheManager** - 缓存 `@MyTable` 注解信息及租户表集合
-- **JSqlDynamicSqlParser** - 基于 JSqlParser 的 SQL 解析和改写（逻辑删除 + 租户隔离）
-- **SqlBuilder** - 多数据库 SQL 方言生成器
-- **DatabaseSchemaValidator** - 启动时校验表结构，同步扫描并注册租户表
-- **TenantIdProvider** - 租户 ID 获取 SPI 接口
-- **TenantContext** - ThreadLocal 工具类，支持编程式设置租户 ID 及临时跳过
+| 组件 | 说明 |
+|---|---|
+| `MyTableEntity` | 实体标记接口，APT 与泛型边界双重规范 |
+| `MyTableAnnotationProcessor` | APT 处理器，编译期校验 `@MyTable` ↔ `MyTableEntity` 双向绑定 |
+| `LambdaQueryWrapper` | Lambda 链式查询构造器，类型安全的条件拼接 |
+| `TableCacheManager` | 缓存 `@MyTable` 注解信息及租户表集合 |
+| `JSqlDynamicSqlParser` | 基于 JSqlParser 的 SQL 解析和改写（逻辑删除 + 租户隔离） |
+| `SqlBuilder` | 多数据库 SQL 方言生成器 |
+| `DatabaseSchemaValidator` | 启动时校验表结构，同步扫描并注册租户表 |
+| `TenantIdProvider` | 租户 ID 获取 SPI 接口 |
+| `TenantContext` | ThreadLocal 工具类，支持编程式设置租户 ID 及临时跳过 |
+
+---
 
 ## 🔨 开发命令
 
 ```bash
-# 编译项目
-mvn clean compile
+# 编译项目（JDK 21）
+JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home mvn clean compile
+
+# 运行测试
+JAVA_HOME=... mvn test
 
 # 打包
-mvn clean package
+JAVA_HOME=... mvn clean package
 
 # 安装到本地仓库
-mvn clean install
+JAVA_HOME=... mvn clean install
 
 # 发布到 Maven Central
-mvn clean deploy -P release
+JAVA_HOME=... mvn clean deploy -P release
 ```
 
 ## 📋 系统要求
