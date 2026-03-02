@@ -379,4 +379,54 @@ class MySQL8CompatibilityTest {
         assertTrue(isDeletedIdx > whereIdx,
                 "INNER JOIN 表的删除条件应在 WHERE 子句中（WHERE 之后）");
     }
+
+    // =========================================================
+    // 6. IN / EXISTS 子查询注入测试
+    // =========================================================
+
+    @Test
+    @Order(25)
+    @DisplayName("6.1 WHERE IN 子查询：子查询内部自动注入删除条件")
+    void test25_inSubQueryDeleteCondition() {
+        String sql = "SELECT * FROM role WHERE id IN (SELECT role_id FROM user WHERE age > 18)";
+        String result = JSqlDynamicSqlParser.appendDeleteCondition(sql);
+
+        // 外层 role 表注入 is_deleted
+        assertTrue(result.contains("is_deleted"), "外层 role 表应注入 is_deleted");
+        // 子查询内 user 表注入 delete_flag
+        assertTrue(result.contains("delete_flag"), "IN 子查询内 user 表应注入 delete_flag");
+    }
+
+    @Test
+    @Order(26)
+    @DisplayName("6.2 WHERE NOT IN 子查询：子查询内部自动注入删除条件")
+    void test26_notInSubQueryDeleteCondition() {
+        String sql = "SELECT * FROM role WHERE id NOT IN (SELECT role_id FROM user)";
+        String result = JSqlDynamicSqlParser.appendDeleteCondition(sql);
+
+        assertTrue(result.contains("is_deleted"), "外层 role 表应注入 is_deleted");
+        assertTrue(result.contains("delete_flag"), "NOT IN 子查询内 user 表应注入 delete_flag");
+    }
+
+    @Test
+    @Order(27)
+    @DisplayName("6.3 WHERE EXISTS 子查询：子查询内部自动注入删除条件")
+    void test27_existsSubQueryDeleteCondition() {
+        String sql = "SELECT * FROM role r WHERE EXISTS (SELECT 1 FROM user u WHERE u.role_id = r.id)";
+        String result = JSqlDynamicSqlParser.appendDeleteCondition(sql);
+
+        assertTrue(result.contains("is_deleted"), "外层 role 表应注入 is_deleted");
+        assertTrue(result.contains("delete_flag"), "EXISTS 子查询内 user 表应注入 delete_flag");
+    }
+
+    @Test
+    @Order(28)
+    @DisplayName("6.4 WHERE NOT EXISTS 子查询：子查询内部自动注入删除条件")
+    void test28_notExistsSubQueryDeleteCondition() {
+        String sql = "SELECT * FROM role r WHERE NOT EXISTS (SELECT 1 FROM user u WHERE u.role_id = r.id)";
+        String result = JSqlDynamicSqlParser.appendDeleteCondition(sql);
+
+        assertTrue(result.contains("is_deleted"), "外层 role 表应注入 is_deleted");
+        assertTrue(result.contains("delete_flag"), "NOT EXISTS 子查询内 user 表应注入 delete_flag");
+    }
 }

@@ -4,12 +4,15 @@ import io.github.mocanjie.base.myjpa.cache.TableCacheManager;
 import io.github.mocanjie.base.myjpa.tenant.TenantContext;
 import net.sf.jsqlparser.JSQLParserException;
 import net.sf.jsqlparser.expression.BinaryExpression;
+import net.sf.jsqlparser.expression.NotExpression;
+import net.sf.jsqlparser.expression.operators.relational.ExistsExpression;
 import net.sf.jsqlparser.expression.Expression;
 import net.sf.jsqlparser.expression.JdbcNamedParameter;
 import net.sf.jsqlparser.expression.LongValue;
 import net.sf.jsqlparser.expression.operators.conditional.AndExpression;
 import net.sf.jsqlparser.expression.operators.conditional.OrExpression;
 import net.sf.jsqlparser.expression.operators.relational.EqualsTo;
+import net.sf.jsqlparser.expression.operators.relational.InExpression;
 import net.sf.jsqlparser.parser.CCJSqlParserUtil;
 import net.sf.jsqlparser.schema.Column;
 import net.sf.jsqlparser.schema.Table;
@@ -309,11 +312,19 @@ public class JSqlDynamicSqlParser {
     }
 
     private static void processTenantExpressionSubQueries(Expression expression) {
-        if (expression instanceof ParenthesedSelect) {
-            processTenantSelect(((ParenthesedSelect) expression).getSelect());
-        } else if (expression instanceof BinaryExpression) {
-            processTenantExpressionSubQueries(((BinaryExpression) expression).getLeftExpression());
-            processTenantExpressionSubQueries(((BinaryExpression) expression).getRightExpression());
+        if (expression instanceof ParenthesedSelect ps) {
+            processTenantSelect(ps.getSelect());
+        } else if (expression instanceof NotExpression notExpr) {
+            processTenantExpressionSubQueries(notExpr.getExpression());
+        } else if (expression instanceof InExpression inExpr) {
+            if (inExpr.getRightExpression() != null) {
+                processTenantExpressionSubQueries(inExpr.getRightExpression());
+            }
+        } else if (expression instanceof ExistsExpression existsExpr) {
+            processTenantExpressionSubQueries(existsExpr.getRightExpression());
+        } else if (expression instanceof BinaryExpression binExpr) {
+            processTenantExpressionSubQueries(binExpr.getLeftExpression());
+            processTenantExpressionSubQueries(binExpr.getRightExpression());
         }
     }
 
@@ -512,11 +523,19 @@ public class JSqlDynamicSqlParser {
     }
 
     private static void processUnifiedExpressionSubQueries(Expression expression) {
-        if (expression instanceof ParenthesedSelect) {
-            processUnifiedSelect(((ParenthesedSelect) expression).getSelect());
-        } else if (expression instanceof BinaryExpression) {
-            processUnifiedExpressionSubQueries(((BinaryExpression) expression).getLeftExpression());
-            processUnifiedExpressionSubQueries(((BinaryExpression) expression).getRightExpression());
+        if (expression instanceof ParenthesedSelect ps) {
+            processUnifiedSelect(ps.getSelect());
+        } else if (expression instanceof NotExpression notExpr) {
+            processUnifiedExpressionSubQueries(notExpr.getExpression());
+        } else if (expression instanceof InExpression inExpr) {
+            if (inExpr.getRightExpression() != null) {
+                processUnifiedExpressionSubQueries(inExpr.getRightExpression());
+            }
+        } else if (expression instanceof ExistsExpression existsExpr) {
+            processUnifiedExpressionSubQueries(existsExpr.getRightExpression());
+        } else if (expression instanceof BinaryExpression binExpr) {
+            processUnifiedExpressionSubQueries(binExpr.getLeftExpression());
+            processUnifiedExpressionSubQueries(binExpr.getRightExpression());
         }
     }
 
@@ -657,15 +676,23 @@ public class JSqlDynamicSqlParser {
      * 递归处理表达式中的子查询
      */
     private static void processExpressionSubQueries(Expression expression) {
-        if (expression instanceof ParenthesedSelect) {
-            ParenthesedSelect parenthesedSelect = (ParenthesedSelect) expression;
-            processSelect(parenthesedSelect.getSelect());
-        } else if (expression instanceof BinaryExpression) {
-            BinaryExpression binaryExpression = (BinaryExpression) expression;
-            processExpressionSubQueries(binaryExpression.getLeftExpression());
-            processExpressionSubQueries(binaryExpression.getRightExpression());
+        if (expression instanceof ParenthesedSelect ps) {
+            processSelect(ps.getSelect());
+        } else if (expression instanceof NotExpression notExpr) {
+            // NOT EXISTS / NOT IN：剥开 NOT 层继续递归
+            processExpressionSubQueries(notExpr.getExpression());
+        } else if (expression instanceof InExpression inExpr) {
+            // WHERE id IN (SELECT ...) / WHERE id NOT IN (SELECT ...)
+            if (inExpr.getRightExpression() != null) {
+                processExpressionSubQueries(inExpr.getRightExpression());
+            }
+        } else if (expression instanceof ExistsExpression existsExpr) {
+            // WHERE EXISTS (SELECT ...)
+            processExpressionSubQueries(existsExpr.getRightExpression());
+        } else if (expression instanceof BinaryExpression binExpr) {
+            processExpressionSubQueries(binExpr.getLeftExpression());
+            processExpressionSubQueries(binExpr.getRightExpression());
         }
-        // 可以根据需要添加更多表达式类型的处理
     }
     
     

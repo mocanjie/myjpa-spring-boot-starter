@@ -549,6 +549,64 @@ class TenantIsolationTest {
     }
 
     // =========================================================
+    // 13. IN / EXISTS 子查询中的租户条件注入
+    // =========================================================
+
+    @Test
+    @Order(34)
+    @DisplayName("13.1 WHERE IN 子查询：子查询内 user 表注入租户条件")
+    void test34_inSubQueryTenantInjection() {
+        String sql = "SELECT * FROM role WHERE id IN (SELECT role_id FROM user WHERE age > 18)";
+        String result = JSqlDynamicSqlParser.appendTenantCondition(sql);
+        // IN 子查询内 user 表有 tenant_id → 应注入
+        assertTrue(result.contains("tenant_id = :myjpaTenantId"),
+                "IN 子查询内 user 表应注入租户条件");
+    }
+
+    @Test
+    @Order(35)
+    @DisplayName("13.2 WHERE NOT IN 子查询：子查询内 user 表注入租户条件")
+    void test35_notInSubQueryTenantInjection() {
+        String sql = "SELECT * FROM role WHERE id NOT IN (SELECT role_id FROM user)";
+        String result = JSqlDynamicSqlParser.appendTenantCondition(sql);
+        assertTrue(result.contains("tenant_id = :myjpaTenantId"),
+                "NOT IN 子查询内 user 表应注入租户条件");
+    }
+
+    @Test
+    @Order(36)
+    @DisplayName("13.3 WHERE EXISTS 子查询：子查询内 user 表注入租户条件")
+    void test36_existsSubQueryTenantInjection() {
+        String sql = "SELECT * FROM role r WHERE EXISTS (SELECT 1 FROM user u WHERE u.role_id = r.id)";
+        String result = JSqlDynamicSqlParser.appendTenantCondition(sql);
+        assertTrue(result.contains("tenant_id = :myjpaTenantId"),
+                "EXISTS 子查询内 user 表应注入租户条件");
+    }
+
+    @Test
+    @Order(37)
+    @DisplayName("13.4 WHERE NOT EXISTS 子查询：子查询内 user 表注入租户条件")
+    void test37_notExistsSubQueryTenantInjection() {
+        String sql = "SELECT * FROM role r WHERE NOT EXISTS (SELECT 1 FROM user u WHERE u.role_id = r.id)";
+        String result = JSqlDynamicSqlParser.appendTenantCondition(sql);
+        assertTrue(result.contains("tenant_id = :myjpaTenantId"),
+                "NOT EXISTS 子查询内 user 表应注入租户条件");
+    }
+
+    @Test
+    @Order(38)
+    @DisplayName("13.5 appendConditions 合并路径：IN 子查询同时注入删除条件和租户条件")
+    void test38_appendConditionsInSubQuery() {
+        String sql = "SELECT * FROM role WHERE id IN (SELECT role_id FROM user WHERE age > 18)";
+        String result = JSqlDynamicSqlParser.appendConditions(sql);
+        // IN 子查询内 user 表：delete_flag + tenant_id 都应注入
+        assertTrue(result.contains("delete_flag"),
+                "IN 子查询内 user 的 delete_flag 应由合并路径注入");
+        assertTrue(result.contains("tenant_id = :myjpaTenantId"),
+                "IN 子查询内 user 的租户条件应由合并路径注入");
+    }
+
+    // =========================================================
     // 辅助方法
     // =========================================================
 
